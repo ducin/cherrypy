@@ -222,7 +222,7 @@ class XmlRpcFilter(BaseFilter):
             encoding=encoding,
             allow_none=1)]
         cherrypy.response.headerMap['Content-Type'] = 'text/xml'
-        cherrypy.response.headerMap['Content-Length'] = `len(cherrypy.response.body)`
+        cherrypy.response.headerMap['Content-Length'] = len(cherrypy.response.body[0])
     
     def beforeErrorResponse(self):
         try:
