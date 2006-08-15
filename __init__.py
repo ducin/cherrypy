@@ -8,6 +8,8 @@ from _cperror import HTTPError, HTTPRedirect, InternalRedirect, NotFound
 from _cperror import WrongConfigValue, TimeoutError
 import config
 
+from _cpwsgi import Application
+
 import _cptools
 tools = _cptools.default_toolbox
 

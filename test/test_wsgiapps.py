@@ -18,6 +18,16 @@ def setup_server():
         keys.sort()
         for k in keys:
             yield '%s: %s\n' % (k,environ[k])
+
+    def reversing_middleware(app):
+        def _app(environ, start_response):
+            results = app(environ, start_response)
+            if not isinstance(results, basestring):
+                results = "".join(results)
+            results = list(results)
+            results.reverse()
+            return "".join(results)
+        return _app
     
     class Root:
         def index(self):
@@ -41,7 +51,10 @@ def setup_server():
                          'tools.staticdir.dir': 'static',
                          }}
     cherrypy.tree.mount(HostedWSGI(), '/hosted/app0', conf0)
-
+    cherrypy.tree.mount(test_app, '/hosted/app1', wrap=False)
+    
+    app = reversing_middleware(cherrypy.Application(Root()))
+    cherrypy.tree.mount(app, '/hosted/app2', wrap=False)
 
 import helper
 
@@ -55,16 +68,28 @@ This is a wsgi app running within CherryPy!'''
         self.getPage("/")
         self.assertBody("I'm a regular CherryPy page handler!")
     
-    def test_02_tools(self):
+    def test_02_wrapped_wsgi(self):
         self.getPage("/hosted/app0")
         self.assertHeader("Content-Type", "text/plain")
         self.assertInBody(self.wsgi_output)
     
-    def test_04_static_subdir(self):
+    def test_03_static_subdir(self):
         self.getPage("/hosted/app0/static/index.html")
         self.assertStatus('200 OK')
         self.assertHeader('Content-Type', 'text/html')
         self.assertBody('Hello, world\r\n')
+    
+    def test_04_pure_wsgi(self):
+        self.getPage("/hosted/app1")
+        self.assertHeader("Content-Type", "text/plain")
+        self.assertInBody(self.wsgi_output)
+
+    def test_05_wrapped_cp_app(self):
+        self.getPage("/hosted/app2/")
+        body = list("I'm a regular CherryPy page handler!")
+        body.reverse()
+        body = "".join(body)
+        self.assertInBody(body)
 
 if __name__ == '__main__':
     setup_server()

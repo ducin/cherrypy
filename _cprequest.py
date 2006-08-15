@@ -168,11 +168,11 @@ class Request(object):
                     raise cherrypy.NotFound()
                 self.app = cherrypy.tree.apps[r]
             else:
-                self.script_name = self.app.script_name
+                self.script_name = self.wsgi_environ.get('SCRIPT_NAME', '')
             
             # path_info should be the path from the
             # app root (script_name) to the handler.
-            self.path_info = self.path[len(self.script_name.rstrip("/")):]
+            self.path_info = self.wsgi_environ.get('PATH_INFO', '')
             
             # Loop to allow for InternalRedirect.
             pi = self.path_info

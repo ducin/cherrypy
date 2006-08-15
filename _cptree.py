@@ -1,74 +1,50 @@
-import logging
-import sys
-
-from cherrypy import config
-
-
-class Application:
-    """A CherryPy Application."""
-    
-    def __init__(self, root, script_name="", conf=None):
-        self.access_log = log = logging.getLogger("cherrypy.access.%s" % id(self))
-        log.setLevel(logging.INFO)
-        
-        self.error_log = log = logging.getLogger("cherrypy.error.%s" % id(self))
-        log.setLevel(logging.DEBUG)
-        
-        self.root = root
-        self.script_name = script_name
-        self.conf = {}
-        if conf:
-            self.merge(conf)
-    
-    def merge(self, conf):
-        """Merge the given config into self.config."""
-        config.merge(self.conf, conf)
-        
-        # Create log handlers as specified in config.
-        rootconf = self.conf.get("/", {})
-        config._configure_builtin_logging(rootconf, self.access_log, "log_access_file")
-        config._configure_builtin_logging(rootconf, self.error_log)
-    
-    def guess_abs_path(self):
-        """Guess the absolute URL from server.socket_host and script_name.
-        
-        When inside a request, the abs_path can be formed via:
-            cherrypy.request.base + (cherrypy.request.app.script_name or "/")
-        
-        However, outside of the request we must guess, hoping the deployer
-        set socket_host and socket_port correctly.
-        """
-        port = int(config.get('server.socket_port', 80))
-        if port in (443, 8443):
-            scheme = "https://"
-        else:
-            scheme = "http://"
-        host = config.get('server.socket_host', '')
-        if port != 80:
-            host += ":%s" % port
-        return scheme + host + self.script_name
+from cherrypy._cperror import format_exc, bare_error
+from cherrypy._cpwsgi import Application, HostedWSGI
+from cherrypy import NotFound
+from cherrypy.lib import http
 
 
 class Tree:
-    """A registry of CherryPy applications, mounted at diverse points."""
+    """A dispatcher of WSGI applications, mounted at diverse points."""
     
     def __init__(self):
         self.apps = {}
     
-    def mount(self, root, script_name="", conf=None):
-        """Mount a new app from a root object, script_name, and conf."""
+    def mount(self, app, script_name="", conf=None, wrap=True):
+        """Mount a new app at script_name using configuration in conf.
+        
+        An application can be one of:
+            1) A standard cherrypy.Application - left as is.
+            2) A "root" object - wrapped in an Application instance.
+            3) A  WSGI callable - optionally wrapped in a HostedWSGI instance.
+        
+        If wrap == True, a WSGI callable will be wrapped in a cherrypy.Application
+        instance, allowing the use of tools with the WSGI application.
+        """
+        
         # Next line both 1) strips trailing slash and 2) maps "/" -> "".
         script_name = script_name.rstrip("/")
-        app = Application(root, script_name, conf)
+        
+        # Leave Application objects alone
+        if isinstance(app, Application):
+            pass
+        # Handle "root" objects...
+        elif not callable(app):
+            app = Application(app, script_name, conf)
+        # Handle WSGI callables
+        elif callable(app) and wrap:
+            app = HostedWSGI(app)
+        # In all other cases leave the app intact (no wrapping)
+        
         self.apps[script_name] = app
         
         # If mounted at "", add favicon.ico
-        if script_name == "" and root and not hasattr(root, "favicon_ico"):
+        if script_name == "" and app and not hasattr(app, "favicon_ico"):
             import os
             from cherrypy import tools
             favicon = os.path.join(os.getcwd(), os.path.dirname(__file__),
                                    "favicon.ico")
-            root.favicon_ico = tools.staticfile.handler(favicon)
+            app.favicon_ico = tools.staticfile.handler(favicon)
         
         return app
     
@@ -110,3 +86,19 @@ class Tree:
         from cherrypy.lib import http
         return http.urljoin(script_name, path)
 
+    def dispatch(self, environ, start_response):
+        """Dispatch to mounted WSGI applications."""
+        script_name = environ.get("SCRIPT_NAME", '').rstrip('/')
+        path_info = environ.get("PATH_INFO", '')
+        
+        mount_points = self.apps.keys()
+        mount_points.sort()
+        mount_points.reverse()
+        
+        for mp in mount_points:
+            if path_info.startswith(mp):
+                environ['SCRIPT_NAME'] = script_name + mp
+                environ['PATH_INFO'] = path_info[len(mp):]
+                app = self.apps[mp]
+                return app(environ, start_response)
+        raise NotFound

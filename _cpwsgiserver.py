@@ -87,23 +87,9 @@ class HTTPRequest(object):
         atoms = [unquote(x) for x in quoted_slash.split(path)]
         path = "%2F".join(atoms)
         
-        for mount_point, wsgi_app in self.server.mount_points:
-            if path == "*":
-                # This means, of course, that the first wsgi_app will
-                # always handle a URI of "*".
-                self.environ["SCRIPT_NAME"] = ""
-                self.environ["PATH_INFO"] = "*"
-                self.wsgi_app = wsgi_app
-                break
-            # The mount_points list should be sorted by length, descending.
-            if path.startswith(mount_point):
-                self.environ["SCRIPT_NAME"] = mount_point
-                self.environ["PATH_INFO"] = path[len(mount_point):]
-                self.wsgi_app = wsgi_app
-                break
-        else:
-            self.abort("404 Not Found")
-            return
+        self.wsgi_app = self.server.app
+        self.environ['SCRIPT_NAME'] = ''
+        self.environ['PATH_INFO'] = path
         
         # Note that, like wsgiref and most other WSGI servers,
         # we unquote the path but not the query string.
@@ -287,17 +273,7 @@ class CherryPyWSGIServer(object):
                  max=-1, request_queue_size=5, timeout=10):
         self.requests = Queue.Queue(max)
         
-        if callable(wsgi_app):
-            # We've been handed a single wsgi_app, in CP-2.1 style.
-            # Assume it's mounted at "".
-            self.mount_points = [("", wsgi_app)]
-        else:
-            # We've been handed a list of (mount_point, wsgi_app) tuples,
-            # so that the server can call different wsgi_apps, and also
-            # correctly set SCRIPT_NAME.
-            self.mount_points = wsgi_app
-        self.mount_points.sort()
-        self.mount_points.reverse()
+        self.app = wsgi_app
         
         self.bind_addr = bind_addr
         self.numthreads = numthreads or 1

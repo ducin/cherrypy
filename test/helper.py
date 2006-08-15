@@ -115,23 +115,8 @@ def _run_test_suite_thread(moduleNames, conf):
         if setup:
             setup()
         
-        # The setup functions probably mounted new apps.
-        # Tell our server about them.
-        apps = []
-        for base, app in cherrypy.tree.apps.iteritems():
-            if base == "/":
-                base = ""
-            if conf.get("profiling.on", False):
-                apps.append((base, profiler.make_app(_cpwsgi.wsgiApp)))
-##                apps.append((base, profiler.make_app(_cpwsgi.wsgiApp, aggregate=True)))
-            else:
-                apps.append((base, _cpwsgi.wsgiApp))
-##            # We could use the following line, but it breaks test_tutorials
-##            apps.append((base, _cpwsgi.make_app(app)))
-        apps.sort()
-        apps.reverse()
         for s in cherrypy.server.httpservers:
-            s.mount_points = apps
+            s.app = cherrypy.tree.dispatch
         
         suite = CPTestLoader.loadTestsFromName(testmod)
         CPTestRunner.run(suite)
