@@ -33,7 +33,7 @@ class Tree:
             app = Application(app, script_name, conf)
         # Handle WSGI callables
         elif callable(app) and wrap:
-            app = HostedWSGI(app)
+            app = Application(HostedWSGI(app), script_name, conf)
         # In all other cases leave the app intact (no wrapping)
         
         self.apps[script_name] = app

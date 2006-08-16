@@ -168,9 +168,7 @@ class HostedWSGI(object):
         self._cp_config = {'tools.wsgiapp.on': True,
                            'tools.wsgiapp.app': app,
                           }
-    
-    def __call__(self, environ, start_response):
-        return self.app(environ, start_response)
+
 
 #                            Server components                            #
 

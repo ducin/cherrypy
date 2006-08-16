@@ -160,15 +160,7 @@ class Request(object):
             # Get the 'Host' header, so we can do HTTPRedirects properly.
             self.process_headers()
             
-            if self.app is None:
-                # Some interfaces (like WSGI) may have already set self.app.
-                # If not, look up the app for this path.
-                self.script_name = r = cherrypy.tree.script_name(self.path)
-                if r is None:
-                    raise cherrypy.NotFound()
-                self.app = cherrypy.tree.apps[r]
-            else:
-                self.script_name = self.wsgi_environ.get('SCRIPT_NAME', '')
+            self.script_name = self.wsgi_environ.get('SCRIPT_NAME', '')
             
             # path_info should be the path from the
             # app root (script_name) to the handler.
