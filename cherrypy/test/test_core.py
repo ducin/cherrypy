@@ -581,7 +581,7 @@ class CoreRequestHandlingTest(helper.CPWebCase):
 Content-type: text/html
 Content-range: bytes 4-6/14
 
-o, w
+o, 
 --%s
 Content-type: text/html
 Content-range: bytes 2-5/14

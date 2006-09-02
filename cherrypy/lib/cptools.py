@@ -311,10 +311,10 @@ def serveFile(path, contentType=None, disposition=None, name=None):
                         yield ("\nContent-range: bytes %s-%s/%s\n\n"
                                % (start, stop - 1, c_len))
                         bodyfile.seek(start)
-                        yield bodyfile.read((stop + 1) - start)
+                        yield bodyfile.read(stop - start)
                         yield "\n"
                     # Final boundary
-                    yield "--" + boundary
+                    yield "--" + boundary + "--"
                 response.body = fileRanges()
         else:
             response.headerMap['Content-Length'] = c_len
