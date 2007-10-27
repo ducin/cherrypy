@@ -332,6 +332,8 @@ class FileStorage:
         storagePath = cherrypy.config.get('sessionFilter.storagePath')
         fileName = self.SESSION_PREFIX + id
         filePath = os.path.join(storagePath, fileName)
+        if not os.path.normpath(filePath).startswith(storagePath):
+            raise cherrypy.HTTPError(400, "Invalid session id in cookie.")
         return filePath
     
     def _lockFile(self, path):
