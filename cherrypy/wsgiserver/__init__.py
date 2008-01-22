@@ -202,7 +202,7 @@ class HTTPRequest(object):
     
     A single HTTP connection may consist of multiple request/response pairs.
     
-    sendall: the 'sendall' method from the connection's fileobject.
+    send: the 'send' method from the connection's socket object.
     wsgi_app: the WSGI application to call.
     environ: a partial WSGI environ (server and connection entries).
         The caller MUST set the following entries:
@@ -235,9 +235,9 @@ class HTTPRequest(object):
     max_request_header_size = 0
     max_request_body_size = 0
     
-    def __init__(self, sendall, environ, wsgi_app):
+    def __init__(self, send, environ, wsgi_app):
         self.rfile = environ['wsgi.input']
-        self.sendall = sendall
+        self.send = send
         self.environ = environ.copy()
         self.wsgi_app = wsgi_app
         
@@ -569,6 +569,16 @@ class HTTPRequest(object):
         else:
             self.sendall(chunk)
     
+    def sendall(self, data):
+        """Sendall for non-blocking sockets."""
+        while data:
+            try:
+                bytes_sent = self.send(data)
+                data = data[bytes_sent:]
+            except socket.error, e:
+                if e.args[0] not in socket_errors_nonblocking:
+                    raise
+    
     def send_headers(self):
         """Assert, process, and send the HTTP response message-headers."""
         hkeys = [key.lower() for key, value in self.outheaders]
@@ -711,7 +721,7 @@ class HTTPConnection(object):
     environ: a WSGI environ template. This will be copied for each request.
     
     rfile: a fileobject for reading from the socket.
-    sendall: a function for writing (+ flush) to the socket.
+    send: a function for writing (+ flush) to the socket.
     """
     
     rbufsize = -1
@@ -736,10 +746,10 @@ class HTTPConnection(object):
             timeout = sock.gettimeout()
             self.rfile = SSL_fileobject(sock, "r", self.rbufsize)
             self.rfile.ssl_timeout = timeout
-            self.sendall = _ssl_wrap_method(sock.sendall)
+            self.send = _ssl_wrap_method(sock.send)
         else:
             self.rfile = sock.makefile("rb", self.rbufsize)
-            self.sendall = sock.sendall
+            self.send = sock.send
         
         # Wrap wsgi.input but not HTTPConnection.rfile itself.
         # We're also not setting maxlen yet; we'll do that separately
@@ -755,7 +765,7 @@ class HTTPConnection(object):
                 # the RequestHandlerClass constructor, the error doesn't
                 # get written to the previous request.
                 req = None
-                req = self.RequestHandlerClass(self.sendall, self.environ,
+                req = self.RequestHandlerClass(self.send, self.environ,
                                                self.wsgi_app)
                 
                 # This order of operations should guarantee correct pipelining.
@@ -777,8 +787,8 @@ class HTTPConnection(object):
         except (KeyboardInterrupt, SystemExit):
             raise
         except NoSSLError:
-            # Unwrap our sendall
-            req.sendall = self.socket._sock.sendall
+            # Unwrap our send
+            req.send = self.socket._sock.send
             req.simple_response("400 Bad Request",
                                 "The client sent a plain HTTP request, but "
                                 "this server only speaks HTTPS on this port.")
@@ -789,6 +799,14 @@ class HTTPConnection(object):
     def close(self):
         """Close the socket underlying this connection."""
         self.rfile.close()
+        
+        # Python's socket module does NOT call close on the kernel socket
+        # when you call socket.close(). We do so manually here because we
+        # want this server to send a FIN TCP segment immediately. Note this
+        # must be called *before* calling socket.close(), because the latter
+        # drops its reference to the kernel socket.
+        self.socket._sock.close()
+        
         self.socket.close()
 
 
