@@ -147,7 +147,7 @@ class HTTPRequest(object):
             return
         self.environ["CONTENT_LENGTH"] = cl or ""
         
-        for k in headers:
+        for k in headers.keys():
             envname = "HTTP_" + k.upper().replace("-", "_")
             if k in comma_separated_headers:
                 self.environ[envname] = ", ".join(headers.getheaders(k))
