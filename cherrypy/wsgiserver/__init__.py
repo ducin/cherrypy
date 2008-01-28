@@ -40,8 +40,8 @@ its origin, not its coupling.
 
 
 import base64
-import Queue
 import os
+import Queue
 import re
 quoted_slash = re.compile("(?i)%2F")
 import rfc822
@@ -711,6 +711,10 @@ class SSL_fileobject(socket._fileobject):
     read = _ssl_wrap_method(socket._fileobject.read, is_reader=True)
     readline = _ssl_wrap_method(socket._fileobject.readline, is_reader=True)
     readlines = _ssl_wrap_method(socket._fileobject.readlines, is_reader=True)
+    
+    def send(self, *args, **kwargs):
+        return self._sock.send(*args, **kwargs)
+    send = _ssl_wrap_method(send)
 
 
 class HTTPConnection(object):
@@ -746,7 +750,7 @@ class HTTPConnection(object):
             timeout = sock.gettimeout()
             self.rfile = SSL_fileobject(sock, "r", self.rbufsize)
             self.rfile.ssl_timeout = timeout
-            self.send = _ssl_wrap_method(sock.send)
+            self.send = self.rfile.send
         else:
             self.rfile = sock.makefile("rb", self.rbufsize)
             self.send = sock.send
