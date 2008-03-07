@@ -234,6 +234,110 @@ class SizeCheckWrapper(object):
         self._check_length()
         return data
 
+class HTTPRequestSocketWrapper(object):
+    """
+    A file like wrapper for HTTP on non-blocking sockets.
+
+    IOW this class provides as much as it can of the file like 
+    interface for sockets over which HTTP requests are made.
+    """
+    def __init__(self, sock):
+        self.sock = sock
+        self.incomplete_line_size = 0
+        self.incomplete_line_buffer = []
+        self.lines_buffer = []
+    
+    def read(self, size=None):
+        raise NotImplementedError
+    
+    def readline(self, size=None):
+        # This doesn't raise the appropriate exceptions
+        # as the result may result in an Index Error?
+
+        # if we can't return their data right away, let's try to read (blocking)
+        if not (self.lines_buffer or (size and self.incomplete_line_size >= size)):
+            self._fill_lines_buffer()
+        
+        # if we have a complete line to send, use it.
+        if self.lines_buffer:
+            line = self.lines_buffer[0]
+            if size and len(line) > size:
+                self.lines_buffer[0] = line[size:]
+                line = line[:size]
+                return line
+            else:
+                return self.lines_buffer.pop(0)
+
+        # If we have enough of a non-complete line to
+            # satisfy the size requirement return that.
+        elif size and self.incomplete_line_size >= size:
+            line = ''.join(self.incomplete_line_buffer)
+            new_incomplete_line = line[:size]
+            self.incomplete_line_size = len(new_incomplete_line)
+            self.incomplete_line_buffer = [new_incomplete_line]
+        else:
+            assert ("We should never get here, should we?")
+            
+    def _fill_lines_buffer(self, size=None):
+        bytes_seen = 0
+        while True:
+            data = self.sock.recv(256)
+            bytes_seen += len(data)
+
+            lines = data.split("\n")
+            # We remove the last piece of the split to ensure
+            # that subsequent processing happens only on data
+            # Representing complete lines.
+            new_incomplete_line = lines.pop()
+            
+            # If we still have data in the lines list that means
+            # we have received some data that forms a complete line
+            if lines:
+                # Ensure that we take the data left over from previous reads
+                # and join it to our current reads before appending the latest
+                # line seen
+                self.incomplete_line_buffer.append(lines.pop(0))
+                self.lines_buffer.append("".join(self.incomplete_line_buffer))
+                self.incomplete_line_size = 0
+                self.incomplete_line_buffer = []
+
+                # remember all other complete lines seen in this read
+                self.lines_buffer.extend(lines)
+               
+            # Record the latest new incomplete line
+            if new_incomplete_line:
+                self.incomplete_line_size += len(new_incomplete_line)
+                self.incomplete_line_buffer.append(new_incomplete_line)
+
+            # If they didn't specify a size and we have a line to send them
+            # stop reading
+            if not size and self.lines_buffer:
+                return
+
+            # if we've read over the size that they wanted, then stop reading
+            if size and bytes_seen > size:
+                return
+    
+    def readlines(self, sizehint=0):
+        raise NotImplementedError
+    
+    def close(self):
+        self.sock.close()
+    
+    def __iter__(self):
+        return self
+    
+    def next(self):
+        data = self.sock.next()
+        self.bytes_read += len(data)
+        return data
+
+    def send(self, *args, **kwargs):
+        return self.sock.send(*args, **kwargs)
+
+    def readline(self, size=None):
+        raise NotImplementedError
+
 
 class HTTPRequest(object):
     """An HTTP Request (and response).
@@ -732,6 +836,8 @@ def _ssl_wrap_method(method, is_reader=False):
                     # The client is talking HTTP to an HTTPS server.
                     raise NoSSLError()
                 raise
+            except:
+                raise
             if time.time() - start > self.ssl_timeout:
                 raise socket.timeout("timed out")
     return ssl_method_wrapper
@@ -753,7 +859,6 @@ class SSL_fileobject(socket._fileobject):
     def send(self, *args, **kwargs):
         return self._sock.send(*args, **kwargs)
     send = _ssl_wrap_method(send)
-
 
 class HTTPConnection(object):
     """An HTTP connection (active socket).
@@ -786,11 +891,12 @@ class HTTPConnection(object):
         
         if SSL and isinstance(sock, SSL.ConnectionType):
             timeout = sock.gettimeout()
-            self.rfile = SSL_fileobject(sock, "r", self.rbufsize)
+            self.rfile = SSL_fileobject(HTTPRequestSocketWrapper(sock), "r", self.rbufsize)
             self.rfile.ssl_timeout = timeout
             self.send = self.rfile.send
         else:
-            self.rfile = sock.makefile("rb", self.rbufsize)
+            #self.rfile = sock.makefile("rb", self.rbufsize)
+            self.rfile = HTTPRequestSocketWrapper(sock)
             self.send = sock.send
         
         # Wrap wsgi.input but not HTTPConnection.rfile itself.
@@ -823,6 +929,11 @@ class HTTPConnection(object):
             errnum = e.args[0]
             if errnum not in socket_errors_to_ignore:
                 if req:
+                    fd = open ("ssl_errors.txt", "a")
+                    fd.write("1" * 80)
+                    fd.write("\n")
+                    fd.write(str(type(e)))
+                    fd.write( format_exc())
                     req.simple_response("500 Internal Server Error",
                                         format_exc())
             return
@@ -834,8 +945,13 @@ class HTTPConnection(object):
             req.simple_response("400 Bad Request",
                                 "The client sent a plain HTTP request, but "
                                 "this server only speaks HTTPS on this port.")
-        except:
+        except Exception, e:
             if req:
+                fd = open ("ssl_errors.txt", "a")
+                fd.write("2" * 80 )
+                fd.write("\n")
+                fd.write(str(type(e)))
+                fd.write( format_exc())
                 req.simple_response("500 Internal Server Error", format_exc())
     
     def close(self):
