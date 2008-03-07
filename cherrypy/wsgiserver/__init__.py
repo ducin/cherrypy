@@ -36,6 +36,44 @@ This won't call the CherryPy engine (application side) at all, only the
 WSGI server, which is independant from the rest of CherryPy. Don't
 let the name "CherryPyWSGIServer" throw you; the name merely reflects
 its origin, not its coupling.
+
+For those of you wanting to understand internals of this module, here's the
+basic call flow. The server's listening thread runs a very tight loop,
+sticking incoming connections onto a Queue:
+
+    server = CherryPyWSGIServer(...)
+    server.start()
+    while True:
+        tick()
+        # This blocks until a request comes in:
+        child = socket.accept()
+        conn = HTTPConnection(child, ...)
+        server.requests.put(conn)
+
+Worker threads are kept in a pool and poll the Queue, popping off and then
+handling each connection in turn. Each connection can consist of an arbitrary
+number of requests and their responses, so we run a nested loop:
+
+    while True:
+        conn = server.requests.get()
+        conn.communicate()
+        ->  while True:
+                req = HTTPRequest(...)
+                req.parse_request()
+                ->  # Read the Request-Line, e.g. "GET /page HTTP/1.1"
+                    req.rfile.readline()
+                    req.read_headers()
+                req.respond()
+                ->  response = wsgi_app(...)
+                    try:
+                        for chunk in response:
+                            if chunk:
+                                req.write(chunk)
+                    finally:
+                        if hasattr(response, "close"):
+                            response.close()
+                if req.close_connection:
+                    return
 """
 
 
