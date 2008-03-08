@@ -192,10 +192,20 @@ class SizeCheckWrapper(object):
     
     def readline(self, size=None):
         if size is not None:
-            data = self.rfile.readline(size)
-            self.bytes_read += len(data)
+            local_bytes_seen = 0
+            seen_data = []
+            while local_bytes_seen < size:
+                data = self.rfile.readline(size-local_bytes_seen)
+                if not data:
+                    break
+                seen_data.append(data)
+                local_bytes_seen += len(data)
+                if '\n' in data:
+                    break
+
+            self.bytes_read += local_bytes_seen
             self._check_length()
-            return data
+            return "".join(seen_data)
         
         # User didn't specify a size ...
         # We read the line in chunks to make sure it's not a 100MB line !
@@ -243,46 +253,29 @@ class HTTPRequestSocketWrapper(object):
     """
     def __init__(self, sock):
         self.sock = sock
-        self.incomplete_line_size = 0
         self.incomplete_line_buffer = []
         self.lines_buffer = []
     
     def read(self, size=None):
         raise NotImplementedError
     
-    def readline(self, size=None):
+    def readline(self):
         # This doesn't raise the appropriate exceptions
         # as the result may result in an Index Error?
 
         # if we can't return their data right away, let's try to read (blocking)
-        if not (self.lines_buffer or (size and self.incomplete_line_size >= size)):
+        if not self.lines_buffer:
             self._fill_lines_buffer()
-        
-        # if we have a complete line to send, use it.
-        if self.lines_buffer:
-            line = self.lines_buffer[0]
-            if size and len(line) > size:
-                self.lines_buffer[0] = line[size:]
-                line = line[:size]
-                return line
-            else:
-                return self.lines_buffer.pop(0)
 
-        # If we have enough of a non-complete line to
-            # satisfy the size requirement return that.
-        elif size and self.incomplete_line_size >= size:
-            line = ''.join(self.incomplete_line_buffer)
-            new_incomplete_line = line[:size]
-            self.incomplete_line_size = len(new_incomplete_line)
-            self.incomplete_line_buffer = [new_incomplete_line]
-        else:
-            assert ("We should never get here, should we?")
+        if not self.lines_buffer:
+            return ""
+        
+        return self.lines_buffer.pop(0)
+
             
-    def _fill_lines_buffer(self, size=None):
-        bytes_seen = 0
+    def _fill_lines_buffer(self):
         while True:
             data = self.sock.recv(256)
-            bytes_seen += len(data)
 
             lines = data.split("\n")
             # We remove the last piece of the split to ensure
@@ -298,24 +291,18 @@ class HTTPRequestSocketWrapper(object):
                 # line seen
                 self.incomplete_line_buffer.append(lines.pop(0))
                 self.lines_buffer.append("".join(self.incomplete_line_buffer))
-                self.incomplete_line_size = 0
+
                 self.incomplete_line_buffer = []
 
                 # remember all other complete lines seen in this read
                 self.lines_buffer.extend(lines)
                
             # Record the latest new incomplete line
-            if new_incomplete_line:
-                self.incomplete_line_size += len(new_incomplete_line)
-                self.incomplete_line_buffer.append(new_incomplete_line)
+            self.incomplete_line_buffer.append(new_incomplete_line)
 
             # If they didn't specify a size and we have a line to send them
             # stop reading
-            if not size and self.lines_buffer:
-                return
-
-            # if we've read over the size that they wanted, then stop reading
-            if size and bytes_seen > size:
+            if self.lines_buffer:
                 return
     
     def readlines(self, sizehint=0):
@@ -891,12 +878,11 @@ class HTTPConnection(object):
         
         if SSL and isinstance(sock, SSL.ConnectionType):
             timeout = sock.gettimeout()
-            self.rfile = SSL_fileobject(HTTPRequestSocketWrapper(sock), "r", self.rbufsize)
+            self.rfile = SSL_fileobject(sock, "r", self.rbufsize)
             self.rfile.ssl_timeout = timeout
             self.send = self.rfile.send
         else:
-            #self.rfile = sock.makefile("rb", self.rbufsize)
-            self.rfile = HTTPRequestSocketWrapper(sock)
+            self.rfile = sock.makefile("rb", self.rbufsize)
             self.send = sock.send
         
         # Wrap wsgi.input but not HTTPConnection.rfile itself.
