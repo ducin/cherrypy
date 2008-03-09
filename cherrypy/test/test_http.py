@@ -38,7 +38,7 @@ def setup_server():
         index.exposed = True
         
         def post_multipart(self, file):
-            """Return a summary ("a * 1000000\nb * 1000000") of the uploaded file."""
+            """Return a summary ("a * 65536\nb * 65536") of the uploaded file."""
             contents = file.file.read()
             summary = []
             curchar = ""
@@ -69,14 +69,17 @@ class HTTPTests(helper.CPWebCase):
         # By not including a Content-Length header, cgi.FieldStorage
         # will hang. Verify that CP times out the socket and responds
         # with 411 Length Required.
-        c = httplib.HTTPConnection("127.0.0.1:%s" % self.PORT)
+        if self.scheme == "https":
+            c = httplib.HTTPSConnection("127.0.0.1:%s" % self.PORT)
+        else:
+            c = httplib.HTTPConnection("127.0.0.1:%s" % self.PORT)
         c.request("POST", "/")
         self.assertEqual(c.getresponse().status, 411)
     
     def test_post_multipart(self):
         alphabet = "abcdefghijklmnopqrstuvwxyz"
         # generate file contents for a large post
-        contents = "".join([c * 1000000 for c in alphabet])
+        contents = "".join([c * 65536 for c in alphabet])
         
         # encode as multipart form data
         files=[('file', 'file.txt', contents)]
@@ -97,7 +100,7 @@ class HTTPTests(helper.CPWebCase):
         self.assertEqual(errcode, 200)
         
         response_body = c.file.read()
-        self.assertEquals(", ".join(["%s * 1000000" % c for c in alphabet]),
+        self.assertEquals(", ".join(["%s * 65536" % c for c in alphabet]),
                           response_body)
 
 
