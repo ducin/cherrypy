@@ -690,8 +690,148 @@ class NoSSLError(Exception):
     pass
 
 
-class SSL_fileobject(socket._fileobject):
+class CP_fileobject(socket._fileobject):
     """Faux file object attached to a socket object."""
+
+    def recv(self, size):
+        return self._sock.recv(size)
+
+    def sendall(self, data):
+        """Sendall for non-blocking sockets."""
+        while data:
+            try:
+                bytes_sent = self._sock.send(data)
+                data = data[bytes_sent:]
+            except socket.error, e:
+                if e.args[0] not in socket_errors_nonblocking:
+                    raise
+
+    def send(self, data):
+        return self._sock.send(data)
+    
+    def flush(self):
+        if self._wbuf:
+            buffer = "".join(self._wbuf)
+            self._wbuf = []
+            self.sendall(buffer)
+    
+    def read(self, size=-1):
+        data = self._rbuf
+        if size < 0:
+            # Read until EOF
+            buffers = []
+            if data:
+                buffers.append(data)
+            self._rbuf = ""
+            if self._rbufsize <= 1:
+                recv_size = self.default_bufsize
+            else:
+                recv_size = self._rbufsize
+            
+            while True:
+                data = self.recv(recv_size)
+                if not data:
+                    break
+                buffers.append(data)
+            return "".join(buffers)
+        else:
+            # Read until size bytes or EOF seen, whichever comes first
+            buf_len = len(data)
+            if buf_len >= size:
+                self._rbuf = data[size:]
+                return data[:size]
+            buffers = []
+            if data:
+                buffers.append(data)
+            self._rbuf = ""
+            while True:
+                left = size - buf_len
+                recv_size = max(self._rbufsize, left)
+                data = self.recv(recv_size)
+                if not data:
+                    break
+                buffers.append(data)
+                n = len(data)
+                if n >= left:
+                    self._rbuf = data[left:]
+                    buffers[-1] = data[:left]
+                    break
+                buf_len += n
+            return "".join(buffers)
+
+    def readline(self, size=-1):
+        data = self._rbuf
+        if size < 0:
+            # Read until \n or EOF, whichever comes first
+            if self._rbufsize <= 1:
+                # Speed up unbuffered case
+                assert data == ""
+                buffers = []
+                while data != "\n":
+                    data = self.recv(1)
+                    if not data:
+                        break
+                    buffers.append(data)
+                return "".join(buffers)
+            nl = data.find('\n')
+            if nl >= 0:
+                nl += 1
+                self._rbuf = data[nl:]
+                return data[:nl]
+            buffers = []
+            if data:
+                buffers.append(data)
+            self._rbuf = ""
+            while True:
+                data = self.recv(self._rbufsize)
+                if not data:
+                    break
+                buffers.append(data)
+                nl = data.find('\n')
+                if nl >= 0:
+                    nl += 1
+                    self._rbuf = data[nl:]
+                    buffers[-1] = data[:nl]
+                    break
+            return "".join(buffers)
+        else:
+            # Read until size bytes or \n or EOF seen, whichever comes first
+            nl = data.find('\n', 0, size)
+            if nl >= 0:
+                nl += 1
+                self._rbuf = data[nl:]
+                return data[:nl]
+            buf_len = len(data)
+            if buf_len >= size:
+                self._rbuf = data[size:]
+                return data[:size]
+            buffers = []
+            if data:
+                buffers.append(data)
+            self._rbuf = ""
+            while True:
+                data = self.recv(self._rbufsize)
+                if not data:
+                    break
+                buffers.append(data)
+                left = size - buf_len
+                nl = data.find('\n', 0, left)
+                if nl >= 0:
+                    nl += 1
+                    self._rbuf = data[nl:]
+                    buffers[-1] = data[:nl]
+                    break
+                n = len(data)
+                if n >= left:
+                    self._rbuf = data[left:]
+                    buffers[-1] = data[:left]
+                    break
+                buf_len += n
+            return "".join(buffers)
+    
+
+class SSL_fileobject(CP_fileobject):
+    """SSL file object attached to a socket object."""
     
     ssl_timeout = 3
     ssl_retry = .01
@@ -740,129 +880,15 @@ class SSL_fileobject(socket._fileobject):
                 raise
             if time.time() - start > self.ssl_timeout:
                 raise socket.timeout("timed out")
-    
-    def flush(self):
-        if self._wbuf:
-            buffer = "".join(self._wbuf)
-            self._wbuf = []
-            self._safe_call(False, self._sock.sendall, buffer)
-    
-    def read(self, size=-1):
-        data = self._rbuf
-        if size < 0:
-            # Read until EOF
-            buffers = []
-            if data:
-                buffers.append(data)
-            self._rbuf = ""
-            if self._rbufsize <= 1:
-                recv_size = self.default_bufsize
-            else:
-                recv_size = self._rbufsize
-            
-            while True:
-                data = self._safe_call(True, self._sock.recv, recv_size)
-                if not data:
-                    break
-                buffers.append(data)
-            return "".join(buffers)
-        else:
-            # Read until size bytes or EOF seen, whichever comes first
-            buf_len = len(data)
-            if buf_len >= size:
-                self._rbuf = data[size:]
-                return data[:size]
-            buffers = []
-            if data:
-                buffers.append(data)
-            self._rbuf = ""
-            while True:
-                left = size - buf_len
-                recv_size = max(self._rbufsize, left)
-                data = self._safe_call(True, self._sock.recv, recv_size)
-                if not data:
-                    break
-                buffers.append(data)
-                n = len(data)
-                if n >= left:
-                    self._rbuf = data[left:]
-                    buffers[-1] = data[:left]
-                    break
-                buf_len += n
-            return "".join(buffers)
 
-    def readline(self, size=-1):
-        data = self._rbuf
-        if size < 0:
-            # Read until \n or EOF, whichever comes first
-            if self._rbufsize <= 1:
-                # Speed up unbuffered case
-                assert data == ""
-                buffers = []
-                while data != "\n":
-                    data = self._safe_call(True, self._sock.recv, 1)
-                    if not data:
-                        break
-                    buffers.append(data)
-                return "".join(buffers)
-            nl = data.find('\n')
-            if nl >= 0:
-                nl += 1
-                self._rbuf = data[nl:]
-                return data[:nl]
-            buffers = []
-            if data:
-                buffers.append(data)
-            self._rbuf = ""
-            while True:
-                data = self._safe_call(True, self._sock.recv, self._rbufsize)
-                if not data:
-                    break
-                buffers.append(data)
-                nl = data.find('\n')
-                if nl >= 0:
-                    nl += 1
-                    self._rbuf = data[nl:]
-                    buffers[-1] = data[:nl]
-                    break
-            return "".join(buffers)
-        else:
-            # Read until size bytes or \n or EOF seen, whichever comes first
-            nl = data.find('\n', 0, size)
-            if nl >= 0:
-                nl += 1
-                self._rbuf = data[nl:]
-                return data[:nl]
-            buf_len = len(data)
-            if buf_len >= size:
-                self._rbuf = data[size:]
-                return data[:size]
-            buffers = []
-            if data:
-                buffers.append(data)
-            self._rbuf = ""
-            while True:
-                data = self._safe_call(True, self._sock.recv, self._rbufsize)
-                if not data:
-                    break
-                buffers.append(data)
-                left = size - buf_len
-                nl = data.find('\n', 0, left)
-                if nl >= 0:
-                    nl += 1
-                    self._rbuf = data[nl:]
-                    buffers[-1] = data[:nl]
-                    break
-                n = len(data)
-                if n >= left:
-                    self._rbuf = data[left:]
-                    buffers[-1] = data[:left]
-                    break
-                buf_len += n
-            return "".join(buffers)
-    
+    def recv(self, *args, **kwargs):
+        return self._safe_call(True, super(SSL_fileobject, self).recv, *args, **kwargs)
+
+    def sendall(self, *args, **kwargs):
+        return self._safe_call(False, super(SSL_fileobject, self).sendall, *args, **kwargs)
+
     def send(self, *args, **kwargs):
-        return self._safe_call(False, self._sock.send, *args, **kwargs)
+        return self._safe_call(False, super(SSL_fileobject, self).send, *args, **kwargs)
 
 
 class HTTPConnection(object):
@@ -900,7 +926,7 @@ class HTTPConnection(object):
             self.rfile.ssl_timeout = timeout
             self.send = self.rfile.send
         else:
-            self.rfile = sock.makefile("rb", self.rbufsize)
+            self.rfile = CP_fileobject(sock, "rb", self.rbufsize)
             self.send = sock.send
         
         # Wrap wsgi.input but not HTTPConnection.rfile itself.
