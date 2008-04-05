@@ -392,11 +392,19 @@ class Request(object):
     
     error_page = {}
     error_page__doc = """
-    A dict of {error code: response filename} pairs. The named response
-    files should be Python string-formatting templates, and can expect by
-    default to receive the format values with the mapping keys 'status',
-    'message', 'traceback', and 'version'. The set of format mappings
-    can be extended by overriding HTTPError.set_response."""
+    A dict of {error code: response filename or callable} pairs.
+    The named response files should be Python string-formatting templates,
+    and can expect by default to receive format values with the mapping
+    keys 'status', 'message', 'traceback', and 'version'. The set of
+    format mappings can be extended by overriding HTTPError.set_response.
+    
+    If a callable is provided, it will be called with the HTTPError
+    instance as the only argument. The callable is expected to set
+    response.status, .headers and .body appropriately.
+    
+    If no entry is given for an error code, the HTTPError's set_response
+    method will handle the error (by setting .status, .headers, and .body).
+    """
     
     show_tracebacks = True
     show_tracebacks__doc = """
@@ -591,7 +599,11 @@ class Request(object):
                     self.hooks.run('before_finalize')
                     cherrypy.response.finalize()
                 except (cherrypy.HTTPRedirect, cherrypy.HTTPError), inst:
-                    inst.set_response()
+                    ep = self.error_page.get(inst.status, '')
+                    if ep and callable(ep):
+                        ep(inst)
+                    else:
+                        inst.set_response()
                     self.stage = 'before_finalize (HTTPError)'
                     self.hooks.run('before_finalize')
                     cherrypy.response.finalize()
@@ -715,7 +727,7 @@ class Request(object):
             self.params.update(p)
     
     def handle_error(self, exc):
-        """Handle the last exception. (Core)"""
+        """Handle the last unanticipated exception. (Core)"""
         try:
             self.hooks.run("before_error_response")
             if self.error_response:
@@ -723,7 +735,11 @@ class Request(object):
             self.hooks.run("after_error_response")
             cherrypy.response.finalize()
         except cherrypy.HTTPRedirect, inst:
-            inst.set_response()
+            ep = self.error_page.get(inst.status, '')
+            if ep and callable(ep):
+                ep(inst)
+            else:
+                inst.set_response()
             cherrypy.response.finalize()
 
 

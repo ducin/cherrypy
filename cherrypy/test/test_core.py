@@ -239,16 +239,24 @@ def setup_server():
         def as_refyield(self):
             for chunk in self.as_yield():
                 yield chunk
-
-
+    
+    
+    def page401(e):
+        cherrypy.response.status = e.status
+        cherrypy._cperror.clean_headers(e.status)
+        cherrypy.response.body = "Well, I'm very sorry but you haven't paid!"
+    
+    
     class Error(Test):
         
         _cp_config = {'tools.log_tracebacks.on': True,
                       }
         
-        def custom(self):
-            raise cherrypy.HTTPError(404, "No, <b>really</b>, not found!")
-        custom._cp_config = {'error_page.404': os.path.join(localDir, "static/index.html")}
+        def custom(self, err='404'):
+            raise cherrypy.HTTPError(int(err), "No, <b>really</b>, not found!")
+        custom._cp_config = {'error_page.404': os.path.join(localDir, "static/index.html"),
+                             'error_page.401': page401,
+                             }
         
         def noexist(self):
             raise cherrypy.HTTPError(404, "No, <b>really</b>, not found!")
@@ -724,6 +732,11 @@ class CoreRequestHandlingTest(helper.CPWebCase):
         self.getPage("/error/custom")
         self.assertStatus(404)
         self.assertBody("Hello, world\r\n" + (" " * 499))
+        
+        # Test custom error page.
+        self.getPage("/error/custom?err=401")
+        self.assertStatus(401)
+        self.assertBody("Well, I'm very sorry but you haven't paid!")
         
         # Test error in custom error page (ticket #305).
         # Note that the message is escaped for HTML (ticket #310).
