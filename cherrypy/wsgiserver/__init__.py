@@ -1487,7 +1487,7 @@ class CherryPyWSGIServer(object):
     
     def populate_ssl_environ(self):
         """Create WSGI environ entries to be merged into each request."""
-        cert = open(self.ssl_certificate).read()
+        cert = open(self.ssl_certificate, 'rb').read()
         cert = crypto.load_certificate(crypto.FILETYPE_PEM, cert)
         ssl_environ = {
             "wsgi.url_scheme": "https",
