@@ -188,7 +188,12 @@ try:
     _console_control_handler.subscribe()
     del win32
 except ImportError:
-    engine = process.bus
+    try:
+        from cherrypy.process import unix
+        engine = unix.UnixBus()
+        del unix
+    except ImportError:
+        engine = process.bus
 
 
 # Timeout monitor
