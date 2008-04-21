@@ -119,9 +119,19 @@ static PyObject* cond_wait( ConditionObject* self, PyObject* args ) {
   // for now timed waits are not supported (it's ignored)
   int err = 0;
   while( !self->set && err != EINVAL ) {
+    /*    struct timespec timeout = {0};
+    timeout.tv_sec = time(0) + 4;
+
+    Py_BEGIN_ALLOW_THREADS;
+    err = pthread_cond_timedwait( &self->cond, &self->lock, &timeout );
+    Py_END_ALLOW_THREADS;
+    */
     Py_BEGIN_ALLOW_THREADS;
     err = pthread_cond_wait( &self->cond, &self->lock );
     Py_END_ALLOW_THREADS;
+    if( PyErr_CheckSignals() ) {
+      return NULL;
+    }
   }
   if( err != 0 ) {
     PyErr_SetFromErrno( PyExc_OSError );
