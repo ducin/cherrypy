@@ -2,6 +2,7 @@
 
 from cgi import escape as _escape
 from sys import exc_info as _exc_info
+from traceback import format_exception as _format_exception
 from urlparse import urljoin as _urljoin
 from cherrypy.lib import http as _http
 
@@ -287,28 +288,31 @@ def get_error_page(status, **kwargs):
         kwargs['traceback'] = ''
     if kwargs.get('version') is None:
         kwargs['version'] = cherrypy.__version__
+    
     for k, v in kwargs.iteritems():
         if v is None:
             kwargs[k] = ""
         else:
             kwargs[k] = _escape(kwargs[k])
     
-    template = _HTTPErrorTemplate
-    
-    # Replace the default template with a custom one?
-    error_page_file = cherrypy.request.error_page.get(code, '')
-    if error_page_file:
+    # Use a custom template or callable for the error page?
+    pages = cherrypy.request.error_page
+    error_page = pages.get(code) or pages.get('default')
+    if error_page:
         try:
-            template = file(error_page_file, 'rb').read()
+            if callable(error_page):
+                return error_page(**kwargs)
+            else:
+                return file(error_page, 'rb').read() % kwargs
         except:
+            e = _format_exception(*_exc_info())[-1]
             m = kwargs['message']
             if m:
                 m += "<br />"
-            m += ("In addition, the custom error page "
-                  "failed:\n<br />%s" % (_exc_info()[1]))
+            m += "In addition, the custom error page failed:\n<br />%s" % e
             kwargs['message'] = m
     
-    return template % kwargs
+    return _HTTPErrorTemplate % kwargs
 
 
 _ie_friendly_error_sizes = {
@@ -376,4 +380,5 @@ def bare_error(extrabody=None):
             [('Content-Type', 'text/plain'),
              ('Content-Length', str(len(body)))],
             [body])
+
 

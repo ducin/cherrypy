@@ -241,10 +241,8 @@ def setup_server():
                 yield chunk
     
     
-    def page401(e):
-        cherrypy.response.status = e.status
-        cherrypy._cperror.clean_headers(e.status)
-        cherrypy.response.body = "Well, I'm very sorry but you haven't paid!"
+    def callable_error_page(status, **kwargs):
+        return "Error %s - Well, I'm very sorry but you haven't paid!" % status
     
     
     class Error(Test):
@@ -255,8 +253,12 @@ def setup_server():
         def custom(self, err='404'):
             raise cherrypy.HTTPError(int(err), "No, <b>really</b>, not found!")
         custom._cp_config = {'error_page.404': os.path.join(localDir, "static/index.html"),
-                             'error_page.401': page401,
+                             'error_page.401': callable_error_page,
                              }
+        
+        def custom_default(self):
+            return 1 + 'a' # raise an unexpected error
+        custom_default._cp_config = {'error_page.default': callable_error_page}
         
         def noexist(self):
             raise cherrypy.HTTPError(404, "No, <b>really</b>, not found!")
@@ -728,15 +730,20 @@ class CoreRequestHandlingTest(helper.CPWebCase):
         finally:
             ignore.pop()
         
-        # Test custom error page.
+        # Test custom error page for a specific error.
         self.getPage("/error/custom")
         self.assertStatus(404)
         self.assertBody("Hello, world\r\n" + (" " * 499))
         
-        # Test custom error page.
+        # Test custom error page for a specific error.
         self.getPage("/error/custom?err=401")
         self.assertStatus(401)
-        self.assertBody("Well, I'm very sorry but you haven't paid!")
+        self.assertBody("Error 401 Unauthorized - Well, I'm very sorry but you haven't paid!")
+        
+        # Test default custom error page.
+        self.getPage("/error/custom_default")
+        self.assertStatus(500)
+        self.assertBody("Error 500 Internal Server Error - Well, I'm very sorry but you haven't paid!".ljust(513))
         
         # Test error in custom error page (ticket #305).
         # Note that the message is escaped for HTML (ticket #310).
@@ -744,7 +751,7 @@ class CoreRequestHandlingTest(helper.CPWebCase):
         self.assertStatus(404)
         msg = ("No, &lt;b&gt;really&lt;/b&gt;, not found!<br />"
                "In addition, the custom error page failed:\n<br />"
-               "[Errno 2] No such file or directory: 'nonexistent.html'")
+               "IOError: [Errno 2] No such file or directory: 'nonexistent.html'")
         self.assertInBody(msg)
         
         if (hasattr(self, 'harness') and

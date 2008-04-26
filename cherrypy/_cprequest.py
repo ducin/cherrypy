@@ -145,7 +145,9 @@ def response_namespace(k, v):
 
 def error_page_namespace(k, v):
     """Attach error pages declared in config."""
-    cherrypy.request.error_page[int(k)] = v
+    if k != 'default':
+        k = int(k)
+    cherrypy.request.error_page[k] = v
 
 
 hookpoints = ['on_start_resource', 'before_request_body',
@@ -393,17 +395,25 @@ class Request(object):
     error_page = {}
     error_page__doc = """
     A dict of {error code: response filename or callable} pairs.
-    The named response files should be Python string-formatting templates,
-    and can expect by default to receive format values with the mapping
-    keys 'status', 'message', 'traceback', and 'version'. The set of
-    format mappings can be extended by overriding HTTPError.set_response.
     
-    If a callable is provided, it will be called with the HTTPError
-    instance as the only argument. The callable is expected to set
-    response.status, .headers and .body appropriately.
+    The error code must be an int representing a given HTTP error code,
+    or the string 'default', which will be used if no matching entry
+    is found for a given numeric code.
     
-    If no entry is given for an error code, the HTTPError's set_response
-    method will handle the error (by setting .status, .headers, and .body).
+    If a filename is provided, the file should contain a Python string-
+    formatting template, and can expect by default to receive format 
+    values with the mapping keys %(status)s, %(message)s, %(traceback)s,
+    and %(version)s. The set of format mappings can be extended by
+    overriding HTTPError.set_response.
+    
+    If a callable is provided, it will be called by default with keyword 
+    arguments 'status', 'message', 'traceback', and 'version', as for a
+    string-formatting template. The callable must return a string which
+    will be set to response.body. It may also override headers or perform
+    any other processing.
+    
+    If no entry is given for an error code, and no 'default' entry exists,
+    a default template will be used.
     """
     
     show_tracebacks = True
@@ -599,11 +609,7 @@ class Request(object):
                     self.hooks.run('before_finalize')
                     cherrypy.response.finalize()
                 except (cherrypy.HTTPRedirect, cherrypy.HTTPError), inst:
-                    ep = self.error_page.get(inst.status, '')
-                    if ep and callable(ep):
-                        ep(inst)
-                    else:
-                        inst.set_response()
+                    inst.set_response()
                     self.stage = 'before_finalize (HTTPError)'
                     self.hooks.run('before_finalize')
                     cherrypy.response.finalize()
@@ -735,11 +741,7 @@ class Request(object):
             self.hooks.run("after_error_response")
             cherrypy.response.finalize()
         except cherrypy.HTTPRedirect, inst:
-            ep = self.error_page.get(inst.status, '')
-            if ep and callable(ep):
-                ep(inst)
-            else:
-                inst.set_response()
+            inst.set_response()
             cherrypy.response.finalize()
 
 
@@ -897,5 +899,6 @@ class Response(object):
         """
         if time.time() > self.time + self.timeout:
             self.timed_out = True
+
 
 
