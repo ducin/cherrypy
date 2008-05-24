@@ -155,6 +155,7 @@ class HandlerTool(Tool):
         return handle_func
     
     def _wrapper(self, **kwargs):
+        """If self.callable returns True, turn off any other handler."""
         if self.callable(**kwargs):
             cherrypy.request.handler = None
     

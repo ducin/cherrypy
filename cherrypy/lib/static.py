@@ -67,9 +67,18 @@ def serve_file(path, content_type=None, disposition=None, name=None):
         response.headers["Content-Disposition"] = cd
     
     # Set Content-Length and use an iterable (file object)
-    #   this way CP won't load the whole file in memory
+    # this way CP won't load the whole file in memory
+    # (assuming response.stream is True and no other
+    # code collapses the body).
     c_len = st.st_size
     bodyfile = open(path, 'rb')
+    fw = getattr(cherrypy.request, 'wsgi_environ', {}).get('wsgi.file_wrapper')
+    if fw is not None:
+        # TODO: support Content-Range
+        response.headers['Content-Length'] = c_len
+        response.body = fw(bodyfile)
+        print ".",
+        return response.body
     
     # HTTP/1.0 didn't have Range/Accept-Ranges headers, or the 206 code
     if cherrypy.request.protocol >= (1, 1):

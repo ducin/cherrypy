@@ -122,6 +122,9 @@ class AppResponse(object):
             # may raise its own error at that point).
             s, h, b = _cperror.bare_error()
             self.iter_response = iter(b)
+        
+        if isinstance(b, self.environ['wsgi.file_wrapper']):
+            self.file_response = b
     
     def iredirect(self, path, query_string):
         """Doctor self.environ and perform an internal redirect.
@@ -297,7 +300,11 @@ class CPWSGIApp(object):
         You probably shouldn't call this; call self.__call__ instead,
         so that any WSGI middleware in self.pipeline can run first.
         """
-        return self.response_class(environ, start_response, self.cpapp)
+        r_iter = self.response_class(environ, start_response, self.cpapp)
+        if getattr(r_iter, 'file_response', None) is not None:
+            # Return the file_wrapper object directly instead
+            return r_iter.file_response
+        return r_iter
     
     def __call__(self, environ, start_response):
         head = self.head

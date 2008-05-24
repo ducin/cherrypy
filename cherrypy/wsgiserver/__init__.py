@@ -545,15 +545,22 @@ class HTTPRequest(object):
         
         response = self.wsgi_app(self.environ, self.start_response)
         try:
-            for chunk in response:
-                # "The start_response callable must not actually transmit
-                # the response headers. Instead, it must store them for the
-                # server or gateway to transmit only after the first
-                # iteration of the application return value that yields
-                # a NON-EMPTY string, or upon the application's first
-                # invocation of the write() callable." (PEP 333)
-                if chunk:
-                    self.write(chunk)
+            if isinstance(response, FileWrapper) and hasattr(response, '_transmit'):
+                if not self.sent_headers:
+                    self.sent_headers = True
+                    self.send_headers()
+                    # TODO: support chunked write
+                response._transmit(self.wfile._sock)
+            else:
+                for chunk in response:
+                    # "The start_response callable must not actually transmit
+                    # the response headers. Instead, it must store them for the
+                    # server or gateway to transmit only after the first
+                    # iteration of the application return value that yields
+                    # a NON-EMPTY string, or upon the application's first
+                    # invocation of the write() callable." (PEP 333)
+                    if chunk:
+                        self.write(chunk)
         finally:
             if hasattr(response, "close"):
                 response.close()
@@ -1538,4 +1545,48 @@ class CherryPyWSGIServer(object):
                     ssl_environ[wsgikey] = value
         
         self.environ.update(ssl_environ)
+
+class FileWrapper(object):
+
+    def __init__(self, filelike, blksize=8192):
+        self.filelike = filelike
+        self.blksize = blksize
+    
+    def close(self):
+        if hasattr(self.filelike, 'close'):
+            self.filelike.close()
+    
+    def __iter__(self):
+        return self
+    
+    def next(self):
+        data = self.filelike.read(self.blksize)
+        if data:
+            return data
+        raise StopIteration
+#HTTPConnection.environ['wsgi.file_wrapper'] = FileWrapper
+    
+try:
+    import sendfile
+except ImportError:
+    pass
+else:
+    class SendFileWrapper(FileWrapper):
+    
+        def _transmit(self, socket):
+            fd = self.filelike.fileno()
+            filelen = os.fstat(fd).st_size
+            offset = 0
+            while offset < filelen:
+                try:
+                    pos, sent = sendfile.sendfile(
+                        socket.fileno(), fd, offset, 
+                        self.blksize)
+                    offset += sent
+                except socket.error, e:
+                    if e.args[0] not in socket_errors_nonblocking:
+                        raise
+                    print format_exc()
+#    HTTPConnection.environ['wsgi.file_wrapper'] = SendFileWrapper
+
 
