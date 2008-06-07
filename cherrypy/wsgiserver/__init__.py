@@ -93,7 +93,6 @@ import threading
 import time
 import traceback
 from urllib import unquote
-from urlparse import urlparse
 import warnings
 
 try:
@@ -243,6 +242,79 @@ class SizeCheckWrapper(object):
         return data
 
 
+MAX_CACHE_SIZE = 0
+_uri_parse_cache = {}
+def requesturi_split(uri):
+    """Parse uri into (scheme, authority, path, query).
+    
+    <scheme>://<authority>/<path>?<query>#<fragment>
+    """
+    # Relevant BNF:
+    #   Request-URI    = "*" | absoluteURI | abs_path | authority
+    #   absoluteURI   = scheme ":" ( hier_part | opaque_part )
+    #   hier_part     = ( net_path | abs_path ) [ "?" query ]
+    #   net_path      = "//" authority [ abs_path ]
+    #   abs_path      = "/"  path_segments
+    #   path_segments = segment *( "/" segment )
+    #   segment       = *pchar *( ";" param )
+    
+    # What to do with "//path"? It cannot be an absoluteURI since it
+    # does not start with a "scheme:" component; it cannot be 'authority'
+    # since it includes the reserved '/' character; therefore, it must
+    # be an abs_path. Note especially that this has NOTHING to do with
+    # the "Relative URI References" section of RFC 2396:
+    #   relativeURI   = ( net_path | abs_path | rel_path ) [ "?" query ]
+    # That is, "//path" cannot be interpreted as a net_path:
+    #   net_path      = "//" authority [ abs_path ]
+    # Unfortunately, urlparse.urlsplit gets this wrong even when we
+    # explicitly tell it we're passing an HTTP URI. So we use our own.
+    
+    # Neither the scheme, the authority, nor the path components
+    # may contain "?", a reserved character.
+    # According to RFC 2396, absoluteURI's might treat everything after the
+    # "scheme:" as an opaque_part (= *uric, including "?"), but we read
+    # RFC 2616 3.2.2 as implying HTTP URI's are always hierarchical.
+    # Therefore, rather than trying to cache all possible URI's, we cache
+    # only the part before the first "?".
+    query = ''
+    if '?' in uri:
+        uri, query = uri.split('?', 1)
+    
+    key = uri
+    cached = _uri_parse_cache.get(key, None)
+    if cached:
+        return cached + (query,)
+    
+    # uri may be an absoluteURI (including "http://host.domain.tld")
+    scheme = authority = ''
+    i = uri.find(':')
+    if i > 0:
+        scheme, uri = uri[:i].lower(), uri[i+1:]
+        # Note the 'authority' component is only allowed when the URI
+        # begins with an explicit "scheme:"
+        if uri[:2] == '//':
+            for c in '/?#': # the order is important!
+                i = uri.find(c, 2)
+                if i >= 0:
+                    authority, uri = uri[2:i], uri[i:]
+                    break
+            else:
+                authority, uri = uri[2:], ''
+    
+    if '#' in uri:
+        raise ValueError("Illegal #fragment in Request-URI.")
+    
+    # avoid runaway growth
+    if MAX_CACHE_SIZE and len(_uri_parse_cache) >= MAX_CACHE_SIZE:
+        try:
+            _uri_parse_cache.popitem()
+        except KeyError:
+            pass
+    _uri_parse_cache[key] = v = (scheme, authority, uri)
+    
+    return v + (query,)
+
+
 class HTTPRequest(object):
     """An HTTP Request (and response).
     
@@ -332,21 +404,17 @@ class HTTPRequest(object):
         
         environ = self.environ
         
-        method, path, req_protocol = request_line.strip().split(" ", 2)
+        method, uri, req_protocol = request_line.strip().split(" ", 2)
         environ["REQUEST_METHOD"] = method
         
-        # path may be an abs_path (including "http://host.domain.tld");
-        scheme, location, path, params, qs, frag = urlparse(path)
-        
-        if frag:
-            self.simple_response("400 Bad Request",
-                                 "Illegal #fragment in Request-URI.")
+        try:
+            scheme, location, path, qs = requesturi_split(uri)
+        except ValueError, e:
+            self.simple_response("400 Bad Request", e.args[0])
             return
         
         if scheme:
             environ["wsgi.url_scheme"] = scheme
-        if params:
-            path = path + ";" + params
         
         environ["SCRIPT_NAME"] = ""
         

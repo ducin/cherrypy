@@ -30,9 +30,13 @@ def urljoin(*atoms):
     This will correctly join a SCRIPT_NAME and PATH_INFO into the
     original URL, even if either atom is blank.
     """
-    url = "/".join([x for x in atoms if x])
-    while "//" in url:
-        url = url.replace("//", "/")
+    if atoms:
+        url = "\x00".join(atoms)
+        url = url.replace("/\x00/", "/")
+        url = url.replace("\x00/", "/")
+        url = url.replace("/\x00", "/")
+    else:
+        url = ""
     # Special-case the final url of "", and return "/" instead.
     return url or "/"
 

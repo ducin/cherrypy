@@ -238,6 +238,11 @@ class ObjectMappingTest(helper.CPWebCase):
             # Test that configs don't overwrite each other from diferent apps
             self.getPage("/confvalue")
             self.assertBody((url or "/").split("/")[-2])
+##            
+##            # Test extra leading slash.
+##            self.getPage("//a/b/c")
+##            self.assertStatus(200)
+##            self.assertBody("default:('', 'a', 'b', 'c')")
         
         self.script_name = ""
         
