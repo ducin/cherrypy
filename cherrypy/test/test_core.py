@@ -327,6 +327,12 @@ def setup_server():
 
     cherrypy.root.divorce = Divorce()
 
+    class Encoded:
+        def default(self, *args):
+            return "Encoded response"
+        default.exposed = True
+
+    cherrypy.root.encoded = Encoded()
 
     class Cookies(Test):
         
@@ -463,7 +469,10 @@ class CoreRequestHandlingTest(helper.CPWebCase):
         self.assertStatus(200)
         
         data = open(log_access_file, "rb").readlines()
-        self.assertEqual(data[0][:15], '127.0.0.1 - - [')
+        address = data[0].split()[0]
+        if address not in ['127.0.0.1', '::ffff:127.0.0.1', '::1']:
+            self.fail('access log did not contain remote IP:\n%s' % (data[0]))
+          
         haslength = False
         for k, v in self.headers:
             if k.lower() == 'content-length':
@@ -475,7 +484,10 @@ class CoreRequestHandlingTest(helper.CPWebCase):
             self.assert_(data[0].endswith('] "GET %s/flatten/as_string HTTP/1.1" 200 - "" ""\n'
                                           % self.prefix()))
         
-        self.assertEqual(data[1][:15], '127.0.0.1 - - [')
+        address = data[1].split()[0]
+        if address not in ['127.0.0.1', '::ffff:127.0.0.1', '::1']:
+            self.fail('access log did not contain remote IP:\n%s' % (data[0]))
+
         haslength = False
         for k, v in self.headers:
             if k.lower() == 'content-length':
@@ -932,6 +944,10 @@ Content-Type: text/plain
             results.append(self.body)
         self.assertEqual(results, ["None"] * 20)
     
+    def testEncodedURL(self):
+        self.getPage('/encoded/%0Ax')
+        self.assertBody("Encoded response")
+
     def testDefaultContentType(self):
         self.getPage('/')
         self.assertHeader('Content-Type', 'text/html')

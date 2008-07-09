@@ -317,8 +317,10 @@ def validStatus(status):
 
 def parseRequestLine(requestLine):
     """Return (method, path, querystring, protocol) from a requestLine."""
-    method, path, protocol = requestLine.split()
-    
+    splitLine = requestLine.split()
+    method, protocol = splitLine[0], splitLine[-1]
+    path = " ".join(splitLine[1:-1])
+
     # path may be an abs_path (including "http://host.domain.tld");
     # Ignore scheme, location, and fragments (so config lookups work).
     # [Therefore, this assumes all hosts are valid for this server.]
