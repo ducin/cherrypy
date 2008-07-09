@@ -317,7 +317,7 @@ def validStatus(status):
 
 def parseRequestLine(requestLine):
     """Return (method, path, querystring, protocol) from a requestLine."""
-    splitLine = requestLine.split()
+    splitLine = requestLine.split(" ")
     method, protocol = splitLine[0], splitLine[-1]
     path = " ".join(splitLine[1:-1])
 
