@@ -223,34 +223,58 @@ class Dispatcher(object):
             nodeconf.update(root._cp_config)
         if "/" in app.config:
             nodeconf.update(app.config["/"])
-        object_trail = [['root', root, nodeconf, curpath]]
         
         node = root
         names = [x for x in path.strip('/').split('/') if x] + ['index']
-        for name in names:
+        object_trail = [['root', root, nodeconf, curpath, names, False]]
+        
+        for i in range(len(names)):
+            name = names[i]
             # map to legal Python identifiers (replace '.' with '_')
             objname = name.replace('.', '_')
             
             nodeconf = {}
-            node = getattr(node, objname, None)
-            if node is not None:
+            is_index = False
+            
+            subnode = getattr(node, objname, None)
+            if subnode is None:
+                # Try a "default" method on the current leaf.
+                subnode = getattr(node, "default", None)
+                if subnode is not None:
+                    is_index = path.endswith('/')
+                # Include the current (unfound) name in the vpath args
+                vpath = names[i:-1]
+            else:
+                if i == len(names) - 1:
+                    # We found the extra ".index". Mark request so tools
+                    # can redirect if path_info has no trailing slash.
+                    is_index = True
+                else:
+                    # We're not at an 'index' handler. Mark request so tools
+                    # can redirect if path_info has NO trailing slash.
+                    # Note that this also includes handlers which take
+                    # positional parameters (virtual paths).
+                    is_index = False
+                vpath = names[i+1:-1]
+            object_trail.append([name, subnode, nodeconf, curpath, vpath, is_index])
+            
+            if subnode is not None:
                 # Get _cp_config attached to this node.
-                if hasattr(node, "_cp_config"):
-                    nodeconf.update(node._cp_config)
+                if hasattr(subnode, "_cp_config"):
+                    nodeconf.update(subnode._cp_config)
+            node = subnode
             
             # Mix in values from app.config for this path.
             curpath = "/".join((curpath, name))
             if curpath in app.config:
                 nodeconf.update(app.config[curpath])
-            
-            object_trail.append([name, node, nodeconf, curpath])
         
         def set_conf():
             """Collapse all object_trail config into cherrypy.request.config."""
             base = cherrypy.config.copy()
             # Note that we merge the config from each node
             # even if that node was None.
-            for name, obj, conf, curpath in object_trail:
+            for name, obj, conf, curpath, vpath, is_index in object_trail:
                 base.update(conf)
                 if 'tools.staticdir.dir' in conf:
                     base['tools.staticdir.section'] = curpath
@@ -260,39 +284,15 @@ class Dispatcher(object):
         num_candidates = len(object_trail) - 1
         for i in xrange(num_candidates, -1, -1):
             
-            name, candidate, nodeconf, curpath = object_trail[i]
+            name, candidate, nodeconf, curpath, vpath, is_index = object_trail[i]
             if candidate is None:
                 continue
-            
-            # Try a "default" method on the current leaf.
-            if hasattr(candidate, "default"):
-                defhandler = candidate.default
-                if getattr(defhandler, 'exposed', False):
-                    # Insert any extra _cp_config from the default handler.
-                    conf = getattr(defhandler, "_cp_config", {})
-                    object_trail.insert(i+1, ["default", defhandler, conf, curpath])
-                    request.config = set_conf()
-                    # See http://www.cherrypy.org/ticket/613
-                    request.is_index = path.endswith("/")
-                    return defhandler, names[i:-1]
-            
-            # Uncomment the next line to restrict positional params to "default".
-            # if i < num_candidates - 2: continue
             
             # Try the current leaf.
             if getattr(candidate, 'exposed', False):
                 request.config = set_conf()
-                if i == num_candidates:
-                    # We found the extra ".index". Mark request so tools
-                    # can redirect if path_info has no trailing slash.
-                    request.is_index = True
-                else:
-                    # We're not at an 'index' handler. Mark request so tools
-                    # can redirect if path_info has NO trailing slash.
-                    # Note that this also includes handlers which take
-                    # positional parameters (virtual paths).
-                    request.is_index = False
-                return candidate, names[i:-1]
+                request.is_index = is_index
+                return candidate, vpath
         
         # We didn't find anything
         request.config = set_conf()
