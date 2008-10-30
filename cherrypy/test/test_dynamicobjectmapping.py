@@ -39,8 +39,8 @@ def setup_server():
             return "SubRoot handler"
         handler.exposed = True
 
-        def getsubnode(self, objname):
-            return subsubnodes.get(objname, None)
+        def dispatch(self, vpath):
+            return subsubnodes.get(vpath[0], None)
 
     subnodes = {
         '1': SubRoot(),
@@ -59,8 +59,8 @@ def setup_server():
             return "handler"
         handler.exposed = True
 
-        def getsubnode(self, objname):
-            return subnodes.get(objname)
+        def dispatch(self, vpath):
+            return subnodes.get(vpath[0])
 
     #--------------------------------------------------------------------------
     # DynamicNodeAndMethodDispatcher example.
@@ -96,9 +96,9 @@ def setup_server():
         def GET(self):
             return unicode(sorted(user_lookup.keys()))
 
-        def getsubnode(self, objname):
+        def dispatch(self, vpath):
             try:
-                id = int(objname)
+                id = int(vpath[0])
             except ValueError:
                 return None
             return UserInstanceNode(id)
@@ -151,11 +151,9 @@ def setup_server():
 
     Root.users = UserContainerNode()
 
-    d = cherrypy.dispatch.DynamicNodeDispatcher()
-    md = cherrypy.dispatch.DynamicNodeAndMethodDispatcher()
+    md = cherrypy.dispatch.MethodDispatcher()
     for url in script_names:
         conf = {'/': {
-                    'request.dispatch': d,
                     'user': (url or "/").split("/")[-2]
                 },
                 '/users': {

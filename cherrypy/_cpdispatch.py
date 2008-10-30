@@ -193,11 +193,6 @@ class Dispatcher(object):
         else:
             request.handler = cherrypy.NotFound()
     
-    _getobject = getattr
-    _getobject__doc = """
-        Template method for resolving the objname given a node.
-    """
-
     def find_handler(self, path):
         """Return the appropriate page handler, plus any virtual path.
         
@@ -220,7 +215,6 @@ class Dispatcher(object):
         request = cherrypy.request
         app = request.app
         root = app.root
-        _getobject = self._getobject
         
         # Get config for the root object/path.
         curpath = ""
@@ -233,12 +227,21 @@ class Dispatcher(object):
         
         node = root
         names = [x for x in path.strip('/').split('/') if x] + ['index']
-        for name in names:
+        iternames = names[:]
+        while iternames:
+            name = iternames[0]
             # map to legal Python identifiers (replace '.' with '_')
             objname = name.replace('.', '_')
             
             nodeconf = {}
-            node = _getobject(node, objname, None)
+            subnode = getattr(node, objname, None)
+            if subnode is None:
+                dispatch = getattr(node, 'dispatch', None)
+                if dispatch and callable(dispatch):
+                    subnode = dispatch(vpath=iternames)
+            name = iternames.pop(0)
+            node = subnode
+
             if node is not None:
                 # Get _cp_config attached to this node.
                 if hasattr(node, "_cp_config"):
@@ -520,61 +523,3 @@ def VirtualHost(next_dispatcher=Dispatcher(), use_x_forwarded_host=True, **domai
         return result
     return vhost_dispatch
 
-
-class _DynamicNodeMixin(Dispatcher):
-    """CherryPy Dispatcher Mixin which makes the tree walking dynamic.
-
-    Adds in the ability for a controller to define a special method:
-    'getsubnode'. This method will be called when a portion of the path
-    is not found as an attribute of the current tree node. The method
-    is responsible for returning either None to indicate this path
-    does not exist or a reference to a new node from which the dispatcher
-    can continue walking the tree.
-
-    """
-    def _getobject(self, node, objname, default=None):
-        """
-        Template method for resolving the objname given a node.
-        """
-        subnode = getattr(node, objname, default)
-        if subnode is None:
-            getsubnode = getattr(node, 'getsubnode', None)
-            if getsubnode and callable(getsubnode):
-                subnode = getsubnode(objname)
-        return subnode
-
-class DynamicNodeDispatcher(_DynamicNodeMixin, Dispatcher):
-    """CP Dispatcher which walks a dynamic tree of objects to find a handler.
-    
-    The tree is rooted at cherrypy.request.app.root, and each hierarchical
-    component in the path_info argument is matched to a corresponding nested
-    attribute of the root object. Matching handlers must have an 'exposed'
-    attribute which evaluates to True. The special method name 'getsubnode'
-    allows the handler to dynamically specify the sub-tree of handlers based
-    on the remaining components in the path_info.
-
-    A special attribute named 'getsubnode' allows components of the path to
-    be dynamic before the end of the URI. For example, the URL
-    "/path/to/resource/<id>/attribute" might return
-    root.path.to.handler.getsubnode(<id>).attribute.
-    """
-
-
-class DynamicNodeAndMethodDispatcher(_DynamicNodeMixin, MethodDispatcher):
-    """CP Dispatcher which walks a dynamic tree of objects to find a handler.
-    
-    The tree is rooted at cherrypy.request.app.root, and each hierarchical
-    component in the path_info argument is matched to a corresponding nested
-    attribute of the root object. Matching handlers must have an 'exposed'
-    attribute which evaluates to True. The special method name 'getsubnode'
-    allows the handler to dynamically specify the sub-tree of handlers based
-    on the remaining components in the path_info.
-
-    A special attribute named 'getsubnode' allows components of the path to
-    be dynamic before the end of the URI. For example, the URL
-    "/path/to/resource/<id>/attribute" might return
-    root.path.to.handler.getsubnode(<id>).attribute.
-
-    The leaf nodes of this dispatcher are invoked in the same way as the
-    MethodDispatcher.
-    """
