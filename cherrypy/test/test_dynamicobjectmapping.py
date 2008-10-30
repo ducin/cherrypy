@@ -65,7 +65,7 @@ def setup_server():
     #--------------------------------------------------------------------------
     # DynamicNodeAndMethodDispatcher example.
     # This example exposes a fairly naive HTTP api
-    class SomeModel(object):
+    class User(object):
         def __init__(self, id, name):
             self.id = id
             self.name = name
@@ -73,83 +73,83 @@ def setup_server():
         def __unicode__(self):
             return unicode(self.name)
 
-    model_lookup = {
-        1: SomeModel(1, 'foo'),
-        2: SomeModel(2, 'bar'),
+    user_lookup = {
+        1: User(1, 'foo'),
+        2: User(2, 'bar'),
     }
 
-    def make_model(name, id=None):
+    def make_user(name, id=None):
         if not id:
-            id = max(*model_lookup.keys()) + 1
-        model_lookup[id] = SomeModel(id, name)
+            id = max(*user_lookup.keys()) + 1
+        user_lookup[id] = User(id, name)
         return id
 
-    class ObjectNode(object):
+    class UserContainerNode(object):
         exposed = True
 
         def POST(self, name):
             """
             Allow the creation of a new Object
             """
-            return "POST %d" % make_model(name)
+            return "POST %d" % make_user(name)
 
         def GET(self):
-            return unicode(sorted(model_lookup.keys()))
+            return unicode(sorted(user_lookup.keys()))
 
         def getsubnode(self, objname):
             try:
                 id = int(objname)
             except ValueError:
                 return None
-            return ModelInstanceNode(id)
+            return UserInstanceNode(id)
 
-    class ModelInstanceNode(object):
+    class UserInstanceNode(object):
         exposed = True
         def __init__(self, id):
             self.id = id
-            self.model = model_lookup.get(id, None)
+            self.user = user_lookup.get(id, None)
 
             # For all but PUT methods there MUST be a valid user identified
             # by self.id
-            if not self.model and cherrypy.request.method != 'PUT':
+            if not self.user and cherrypy.request.method != 'PUT':
                 raise cherrypy.HTTPError(404)
 
         def GET(self, *args, **kwargs):
             """
             Return the appropriate representation of the instance.
             """
-            return unicode(self.model)
+            return unicode(self.user)
 
         def POST(self, name):
             """
             Update the fields of the user instance.
             """
-            self.model.name = name
-            return "POST %d" % self.model.id
+            self.user.name = name
+            return "POST %d" % self.user.id
 
         def PUT(self, name):
             """
             Create a new user with the specified id, or edit it if it already exists
             """
-            if self.model:
-                # Edit the current model
-                self.model.name = name
-                return "PUT %d" % self.model.id
+            if self.user:
+                # Edit the current user
+                self.user.name = name
+                return "PUT %d" % self.user.id
             else:
-                # Make a new model with said attributes.
-                return "PUT %d" % make_model(name, self.id)
+                # Make a new user with said attributes.
+                return "PUT %d" % make_user(name, self.id)
 
         def DELETE(self):
             """
             Delete the user specified at the id.
             """
-            id = self.model.id
-            del model_lookup[self.model.id]
-            del self.model
+            id = self.user.id
+            del user_lookup[self.user.id]
+            del self.user
             return "DELETE %d" % id
 
 
-    Root.models = ObjectNode()
+    Root.users = UserContainerNode()
 
     d = cherrypy.dispatch.DynamicNodeDispatcher()
     md = cherrypy.dispatch.DynamicNodeAndMethodDispatcher()
@@ -158,7 +158,7 @@ def setup_server():
                     'request.dispatch': d,
                     'user': (url or "/").split("/")[-2]
                 },
-                '/models': {
+                '/users': {
                     'request.dispatch': md},
                 }
         cherrypy.tree.mount(Root(), url, conf)
@@ -232,27 +232,27 @@ class DynamicObjectMappingTest(helper.CPWebCase):
 
     def testMethodDispatch(self):
         # GET acts like a container
-        self.getPage("/models")
+        self.getPage("/users")
         self.assertBody("[1, 2]")
         self.assertHeader('Allow', 'GET, HEAD, POST')
 
         # POST to the container URI allows creation
-        self.getPage("/models", method="POST", body="name=baz")
+        self.getPage("/users", method="POST", body="name=baz")
         self.assertBody("POST 3")
         self.assertHeader('Allow', 'GET, HEAD, POST')
 
         # POST to a specific instanct URI results in a 404
         # as the resource does not exit.
-        self.getPage("/models/5", method="POST", body="name=baz")
+        self.getPage("/users/5", method="POST", body="name=baz")
         self.assertStatus(404)
 
         # PUT to a specific instanct URI results in creation
-        self.getPage("/models/5", method="PUT", body="name=boris")
+        self.getPage("/users/5", method="PUT", body="name=boris")
         self.assertBody("PUT 5")
         self.assertHeader('Allow', 'DELETE, GET, HEAD, POST, PUT')
 
         # GET acts like a container
-        self.getPage("/models")
+        self.getPage("/users")
         self.assertBody("[1, 2, 3, 5]")
         self.assertHeader('Allow', 'GET, HEAD, POST')
 
@@ -263,28 +263,28 @@ class DynamicObjectMappingTest(helper.CPWebCase):
             (5, 'boris', 'borisupdated', 'DELETE, GET, HEAD, POST, PUT'),
         )
         for id, name, updatedname, headers in test_cases:
-            self.getPage("/models/%d" % id)
+            self.getPage("/users/%d" % id)
             self.assertBody(name)
             self.assertHeader('Allow', headers)
 
             # Make sure POSTs update already existings resources
-            self.getPage("/models/%d" % id, method='POST', body="name=%s" % updatedname)
+            self.getPage("/users/%d" % id, method='POST', body="name=%s" % updatedname)
             self.assertBody("POST %d" % id)
             self.assertHeader('Allow', headers)
 
             # Make sure PUTs Update already existing resources.
-            self.getPage("/models/%d" % id, method='PUT', body="name=%s" % updatedname)
+            self.getPage("/users/%d" % id, method='PUT', body="name=%s" % updatedname)
             self.assertBody("PUT %d" % id)
             self.assertHeader('Allow', headers)
 
             # Make sure DELETES Remove already existing resources.
-            self.getPage("/models/%d" % id, method='DELETE')
+            self.getPage("/users/%d" % id, method='DELETE')
             self.assertBody("DELETE %d" % id)
             self.assertHeader('Allow', headers)
 
 
         # GET acts like a container
-        self.getPage("/models")
+        self.getPage("/users")
         self.assertBody("[]")
         self.assertHeader('Allow', 'GET, HEAD, POST')
 
