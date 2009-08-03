@@ -291,6 +291,7 @@ class HTTPRequest(object):
         self.wsgi_app = wsgi_app
         
         self.ready = False
+        self.started_request = False
         self.started_response = False
         self.status = ""
         self.outheaders = []
@@ -318,6 +319,9 @@ class HTTPRequest(object):
         # (although your TCP stack might suffer for it: cf Apache's history
         # with FIN_WAIT_2).
         request_line = self.rfile.readline()
+        # Set started_request to True so communicate() knows to send 408
+        # from here on out.
+        self.started_request = True
         if not request_line:
             # Force self.ready = False so the connection will close.
             self.ready = False
@@ -333,6 +337,10 @@ class HTTPRequest(object):
                 self.ready = False
                 return
         
+        if not request_line.endswith('\r\n'):
+            self.simple_response(400, "HTTP requires CRLF terminators")
+            return
+        
         environ = self.environ
         
         try:
@@ -341,6 +349,7 @@ class HTTPRequest(object):
             self.simple_response(400, "Malformed Request-Line")
             return
         
+        environ["REQUEST_URI"] = path
         environ["REQUEST_METHOD"] = method
         
         # path may be an abs_path (including "http://host.domain.tld");
@@ -364,12 +373,16 @@ class HTTPRequest(object):
         # But note that "...a URI must be separated into its components
         # before the escaped characters within those components can be
         # safely decoded." http://www.ietf.org/rfc/rfc2396.txt, sec 2.4.2
-        atoms = [unquote(x) for x in quoted_slash.split(path)]
+        try:
+            atoms = [unquote(x) for x in quoted_slash.split(path)]
+        except ValueError, ex:
+            self.simple_response("400 Bad Request", ex.args[0])
+            return
         path = "%2F".join(atoms)
         environ["PATH_INFO"] = path
         
         # Note that, like wsgiref and most other WSGI servers,
-        # we unquote the path but not the query string.
+        # we "% HEX HEX"-unquote the path but not the query string.
         environ["QUERY_STRING"] = qs
         
         # Compare request and server HTTP protocol versions, in case our
@@ -475,6 +488,8 @@ class HTTPRequest(object):
             if line == '\r\n':
                 # Normal end of headers
                 break
+            if not line.endswith('\r\n'):
+                raise ValueError("HTTP requires CRLF terminators")
             
             if line[0] in ' \t':
                 # It's a continuation line.
@@ -503,7 +518,13 @@ class HTTPRequest(object):
         data = StringIO.StringIO()
         while True:
             line = self.rfile.readline().strip().split(";", 1)
-            chunk_size = int(line.pop(0), 16)
+            try:
+                chunk_size = line.pop(0)
+                chunk_size = int(chunk_size, 16)
+            except ValueError:
+                self.simple_response("400 Bad Request",
+                     "Bad chunked transfer size: " + repr(chunk_size))
+                return
             if chunk_size <= 0:
                 break
 ##            if line: chunk_extension = line[0]
@@ -563,6 +584,8 @@ class HTTPRequest(object):
                 # a NON-EMPTY string, or upon the application's first
                 # invocation of the write() callable." (PEP 333)
                 if chunk:
+                    if isinstance(chunk, unicode):
+                        chunk = chunk.encode('ISO-8859-1')
                     self.write(chunk)
         finally:
             if hasattr(response, "close"):
@@ -588,6 +611,8 @@ class HTTPRequest(object):
         
         buf.append("\r\n")
         if msg:
+            if isinstance(msg, unicode):
+                msg = msg.encode("ISO-8859-1")
             buf.append(msg)
         
         try:
@@ -1157,6 +1182,7 @@ class HTTPConnection(object):
     
     def communicate(self):
         """Read each request and respond appropriately."""
+        request_seen = False
         try:
             while True:
                 # (re)set req to None so that if something goes wrong in
@@ -1169,25 +1195,43 @@ class HTTPConnection(object):
                 # This order of operations should guarantee correct pipelining.
                 req.parse_request()
                 if not req.ready:
+                    # Something went wrong in the parsing (and the server has
+                    # probably already made a simple_response). Return and
+                    # let the conn close.
                     return
                 
+                request_seen = True
                 req.respond()
                 if req.close_connection:
                     return
-        
         except socket.error, e:
             errnum = e.args[0]
             if errnum == 'timed out':
-                if req and not req.sent_headers:
-                    req.simple_response("408 Request Timeout")
+                # Don't error if we're between requests; only error
+                # if 1) no request has been started at all, or 2) we're
+                # in the middle of a request.
+                # See http://www.cherrypy.org/ticket/853
+                if (not request_seen) or (req and req.started_request):
+                    # Don't bother writing the 408 if the response
+                    # has already started being written.
+                    if req and not req.sent_headers:
+                        try:
+                            req.simple_response("408 Request Timeout")
+                        except FatalSSLAlert:
+                            # Close the connection.
+                            return
             elif errnum not in socket_errors_to_ignore:
                 if req and not req.sent_headers:
-                    req.simple_response("500 Internal Server Error",
-                                        format_exc())
+                    try:
+                        req.simple_response("500 Internal Server Error",
+                                            format_exc())
+                    except FatalSSLAlert:
+                        # Close the connection.
+                        return
             return
         except (KeyboardInterrupt, SystemExit):
             raise
-        except FatalSSLAlert, e:
+        except FatalSSLAlert:
             # Close the connection.
             return
         except NoSSLError:
@@ -1198,9 +1242,13 @@ class HTTPConnection(object):
                     "The client sent a plain HTTP request, but "
                     "this server only speaks HTTPS on this port.")
                 self.linger = True
-        except Exception, e:
+        except Exception:
             if req and not req.sent_headers:
-                req.simple_response("500 Internal Server Error", format_exc())
+                try:
+                    req.simple_response("500 Internal Server Error", format_exc())
+                except FatalSSLAlert:
+                    # Close the connection.
+                    return
     
     linger = False
     
@@ -1593,7 +1641,7 @@ class CherryPyWSGIServer(object):
                 continue
             break
         if not self.socket:
-            raise socket.error, msg
+            raise socket.error(msg)
         
         # Timeout so KeyboardInterrupt can be caught on Win32
         self.socket.settimeout(1)

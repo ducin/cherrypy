@@ -376,7 +376,7 @@ def run():
         'test_proxy',
         'test_caching',
         'test_config',
-##        'test_conn',
+        'test_conn',
         'test_core',
         'test_tools',
         'test_encoding',
