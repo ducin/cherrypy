@@ -24,8 +24,15 @@ class PageHandler(object):
         try:
             return self.callable(*self.args, **self.kwargs)
         except TypeError, x:
-            test_callable_spec(self.callable, self.args, self.kwargs)
+            try:
+                test_callable_spec(self.callable, self.args, self.kwargs)
+            except cherrypy.HTTPError, error:
+                raise error
+            except:
+                raise x
             raise
+
+
 
 def test_callable_spec(callable, callable_args, callable_kwargs):
     """
@@ -46,7 +53,17 @@ def test_callable_spec(callable, callable_args, callable_kwargs):
     incorrect, then a 404 Not Found should be raised. Conversely the body
     parameters are part of the request; if they are invalid a 400 Bad Request.
     """
-    (args, varargs, varkw, defaults) = inspect.getargspec(callable)
+    show_mismatched_params = getattr(
+        cherrypy.serving.request, 'show_mismatched_params', False)
+    try:
+        (args, varargs, varkw, defaults) = inspect.getargspec(callable)
+    except TypeError:
+        if isinstance(callable, object) and hasattr(callable, '__call__'):
+            (args, varargs, varkw, defaults) = inspect.getargspec(callable.__call__)
+        else:
+            # If it wasn't one of our own types, re-raise 
+            # the original error
+            raise
 
     if args and args[0] == 'self':
         args = args[1:]
@@ -69,14 +86,16 @@ def test_callable_spec(callable, callable_args, callable_kwargs):
             varkw_usage += 1
             extra_kwargs.add(key)
 
+    # figure out which args have defaults.
+    args_with_defaults = args[-len(defaults or []):]
     for i, val in enumerate(defaults or []):
         # Defaults take effect only when the arg hasn't been used yet.
-        if arg_usage[args[i]] == 0:
-            arg_usage[args[i]] += 1
+        if arg_usage[args_with_defaults[i]] == 0:
+            arg_usage[args_with_defaults[i]] += 1
 
     missing_args = []
     multiple_args = []
-    for key, usage in arg_usage.iteritems():
+    for key, usage in arg_usage.items():
         if usage == 0:
             missing_args.append(key)
         elif usage > 1:
@@ -95,19 +114,19 @@ def test_callable_spec(callable, callable_args, callable_kwargs):
         # 
         # In the case where the method does not allow body
         # arguments it's definitely a 404.
-        raise cherrypy.HTTPError(404,
-                message="Missing parameters: %s" % ",".join(missing_args))
-
+        message = None
+        if show_mismatched_params:
+            message="Missing parameters: %s" % ",".join(missing_args)
+        raise cherrypy.HTTPError(404, message=message)
     # the extra positional arguments come from the path - 404 Not Found
     if not varargs and vararg_usage > 0:
         raise cherrypy.HTTPError(404)
 
-    body_params = cherrypy.request.body_params or {}
+    body_params = cherrypy.serving.request.body_params or {}
     body_params = set(body_params.keys())
     qs_params = set(callable_kwargs.keys()) - body_params
 
     if multiple_args:
-
         if qs_params.intersection(set(multiple_args)):
             # If any of the multiple parameters came from the query string then
             # it's a 404 Not Found
@@ -116,25 +135,31 @@ def test_callable_spec(callable, callable_args, callable_kwargs):
             # Otherwise it's a 400 Bad Request
             error = 400
 
-        raise cherrypy.HTTPError(error,
-                message="Multiple values for parameters: "\
-                        "%s" % ",".join(multiple_args))
+        message = None
+        if show_mismatched_params:
+            message="Multiple values for parameters: "\
+                    "%s" % ",".join(multiple_args)
+        raise cherrypy.HTTPError(error, message=message)
 
     if not varkw and varkw_usage > 0:
 
         # If there were extra query string parameters, it's a 404 Not Found
         extra_qs_params = set(qs_params).intersection(extra_kwargs)
         if extra_qs_params:
-            raise cherrypy.HTTPError(404,
+            message = None
+            if show_mismatched_params:
                 message="Unexpected query string "\
-                        "parameters: %s" % ", ".join(extra_qs_params))
+                        "parameters: %s" % ", ".join(extra_qs_params)
+            raise cherrypy.HTTPError(404, message=message)
 
         # If there were any extra body parameters, it's a 400 Not Found
         extra_body_params = set(body_params).intersection(extra_kwargs)
         if extra_body_params:
-            raise cherrypy.HTTPError(400,
+            message = None
+            if show_mismatched_params:
                 message="Unexpected body parameters: "\
-                        "%s" % ", ".join(extra_body_params))
+                        "%s" % ", ".join(extra_body_params)
+            raise cherrypy.HTTPError(400, message=message)
 
 
 try:
