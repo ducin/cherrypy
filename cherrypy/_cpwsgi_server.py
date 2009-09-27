@@ -8,17 +8,11 @@ from cherrypy import wsgiserver
 
 
 class CPHTTPRequest(wsgiserver.HTTPRequest):
-    
-    def __init__(self, rfile, wfile, environ, wsgi_app):
-        s = cherrypy.server
-        self.max_request_header_size = s.max_request_header_size or 0
-        self.max_request_body_size = s.max_request_body_size or 0
-        wsgiserver.HTTPRequest.__init__(self, rfile, wfile, environ, wsgi_app)
+    pass
 
 
 class CPHTTPConnection(wsgiserver.HTTPConnection):
-    
-    RequestHandlerClass = CPHTTPRequest
+    pass
 
 
 class CPWSGIServer(wsgiserver.CherryPyWSGIServer):
@@ -30,27 +24,16 @@ class CPWSGIServer(wsgiserver.CherryPyWSGIServer):
     and apply some attributes from config -> cherrypy.server -> wsgiserver.
     """
     
-    ConnectionClass = CPHTTPConnection
-    
     def __init__(self, server_adapter=cherrypy.server):
         self.server_adapter = server_adapter
-        
-        # We have to make custom subclasses of wsgiserver internals here
-        # so that our server.* attributes get applied to every request.
-        class _CPHTTPRequest(wsgiserver.HTTPRequest):
-            def __init__(self, rfile, wfile, environ, wsgi_app):
-                s = server_adapter
-                self.max_request_header_size = s.max_request_header_size or 0
-                self.max_request_body_size = s.max_request_body_size or 0
-                wsgiserver.HTTPRequest.__init__(self, rfile, wfile, environ, wsgi_app)
-        class _CPHTTPConnection(wsgiserver.HTTPConnection):
-            RequestHandlerClass = _CPHTTPRequest
-        self.ConnectionClass = _CPHTTPConnection
+        self.max_request_header_size = self.server_adapter.max_request_header_size or 0
+        self.max_request_body_size = self.server_adapter.max_request_body_size or 0
         
         server_name = (self.server_adapter.socket_host or
                        self.server_adapter.socket_file or
                        None)
         
+        self.wsgi_version = self.server_adapter.wsgi_version
         s = wsgiserver.CherryPyWSGIServer
         s.__init__(self, server_adapter.bind_addr, cherrypy.tree,
                    self.server_adapter.thread_pool,
@@ -62,8 +45,6 @@ class CPWSGIServer(wsgiserver.CherryPyWSGIServer):
                    )
         self.protocol = self.server_adapter.protocol_version
         self.nodelay = self.server_adapter.nodelay
-        
-        self.environ["wsgi.version"] = self.server_adapter.wsgi_version
         
         if self.server_adapter.ssl_context:
             adapter_class = self.get_ssl_adapter_class()

@@ -11,8 +11,8 @@ from cherrypy import _cperror
 from cherrypy.lib import httputil
 
 
-def downgrade_wsgi_11_to_10(environ):
-    """Return a new environ dict for WSGI 1.0 from the given WSGI 1.1 environ."""
+def downgrade_wsgi_u0_to_10(environ):
+    """Return a new environ dict for WSGI 1.0 from the given WSGI u.0 environ."""
     env10 = {}
     
     enc = environ[u'wsgi.url_encoding']
@@ -89,8 +89,8 @@ class AppResponse(object):
     def __init__(self, environ, start_response, cpapp, recursive=False):
         self.redirections = []
         self.recursive = recursive
-        if environ.get(u'wsgi.version') == (1, 1):
-            environ = downgrade_wsgi_11_to_10(environ)
+        if environ.get(u'wsgi.version') == ('u', 0):
+            environ = downgrade_wsgi_u0_to_10(environ)
         self.environ = environ
         self.start_response = start_response
         self.cpapp = cpapp
