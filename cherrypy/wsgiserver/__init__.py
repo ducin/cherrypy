@@ -1457,7 +1457,7 @@ class SSLAdapter(object):
         raise NotImplemented
 
 
-class CherryPyHTTPServer(object):
+class HTTPServer(object):
     """An HTTP server.
     
     bind_addr: The interface on which to listen for connections.
@@ -1797,10 +1797,42 @@ class Gateway(object):
     def respond(self):
         raise NotImplemented
 
+
+# These may either be wsgiserver.SSLAdapter subclasses or the string names
+# of such classes (in which case they will be lazily loaded).
+ssl_adapters = {
+    'builtin': 'cherrypy.wsgiserver.ssl_builtin.BuiltinSSLAdapter',
+    'pyopenssl': 'cherrypy.wsgiserver.ssl_pyopenssl.pyOpenSSLAdapter',
+    }
+
+def get_ssl_adapter_class(name='pyopenssl'):
+    adapter = ssl_adapters[name.lower()]
+    if isinstance(adapter, basestring):
+        last_dot = adapter.rfind(".")
+        attr_name = adapter[last_dot + 1:]
+        mod_path = adapter[:last_dot]
+        
+        try:
+            mod = sys.modules[mod_path]
+            if mod is None:
+                raise KeyError()
+        except KeyError:
+            # The last [''] is important.
+            mod = __import__(mod_path, globals(), locals(), [''])
+        
+        # Let an AttributeError propagate outward.
+        try:
+            adapter = getattr(mod, attr_name)
+        except AttributeError:
+            raise AttributeError("'%s' object has no attribute '%s'"
+                                 % (mod_path, attr_name))
+    
+    return adapter
+
 # -------------------------------- WSGI Stuff -------------------------------- #
 
 
-class CherryPyWSGIServer(CherryPyHTTPServer):
+class CherryPyWSGIServer(HTTPServer):
     
     wsgi_version = (1, 0)
     
@@ -1951,14 +1983,14 @@ class WSGIGateway_10(WSGIGateway):
         return env
 
 
-class WSGIGateway_u0(WSGIGateway):
+class WSGIGateway_u0(WSGIGateway_10):
     
     def get_environ(self):
         """Return a new environ dict targeting the given wsgi.version"""
         req = self.req
         env_10 = WSGIGateway_10.get_environ(self)
         env = dict([(k.decode('ISO-8859-1'), v) for k, v in env_10.iteritems()])
-        env[u'wsgi.version'] = ('u', 0),
+        env[u'wsgi.version'] = ('u', 0)
         
         # Request-URI
         env.setdefault(u'wsgi.url_encoding', u'utf-8')
