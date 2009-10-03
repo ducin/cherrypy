@@ -475,16 +475,18 @@ class HTTPRequest(object):
         send_headers.
     """
     
-    scheme = "http"
-    
     def __init__(self, server, conn):
         self.server= server
         self.conn = conn
         
         self.ready = False
         self.started_request = False
-        self.status = ""
+        self.scheme = "http"
+        if self.server.ssl_adapter is not None:
+            self.scheme = "https"
         self.inheaders = {}
+        
+        self.status = ""
         self.outheaders = []
         self.sent_headers = False
         self.close_connection = False
