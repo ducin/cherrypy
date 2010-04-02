@@ -18,7 +18,7 @@ required_python_version = '2.3'
 # arguments for the setup command
 ###############################################################################
 name = "CherryPy"
-version = "2.3.0"
+version = "2.3.1"
 desc = "Object-Oriented web development framework"
 long_desc = "CherryPy is a pythonic, object-oriented web development framework"
 classifiers=[
@@ -38,7 +38,7 @@ packages=[
     "cherrypy", "cherrypy.lib", "cherrypy.lib.filter",
     "cherrypy.tutorial", "cherrypy.test", "cherrypy.filters",
 ]
-download_url="http://download.cherrypy.org/cherrypy/2.3.0/"
+download_url="http://download.cherrypy.org/cherrypy/2.3.1/"
 data_files=[
     ('cherrypy/tutorial',
         [
