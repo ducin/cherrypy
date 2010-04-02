@@ -1,6 +1,8 @@
 """Tools which both CherryPy and application developers may invoke."""
-
-import md5
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import new as md5
 import mimetools
 import mimetypes
 mimetypes.init()
@@ -99,7 +101,7 @@ def validate_etags(autotags=False):
     if (not etag) and autotags:
         if status == 200:
             etag = response.collapse_body()
-            etag = '"%s"' % md5.new(etag).hexdigest()
+            etag = '"%s"' % md5(etag).hexdigest()
             response.headers['ETag'] = etag
     
     response.ETag = etag

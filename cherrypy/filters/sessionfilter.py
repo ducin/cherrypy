@@ -30,7 +30,11 @@ try:
 except ImportError:
     import pickle
 import random
-import sha
+try:
+    from hashlib import sha1
+except ImportError:
+    from sha import new as sha1
+
 import time
 import thread
 import threading
@@ -450,7 +454,7 @@ except (AttributeError, NotImplementedError):
     # os.urandom not available until Python 2.4. Fall back to random.random.
     def generate_session_id():
         """Return a new session id."""
-        return sha.new('%s' % random.random()).hexdigest()
+        return sha1('%s' % random.random()).hexdigest()
 else:
     def generate_session_id():
         """Return a new session id."""
