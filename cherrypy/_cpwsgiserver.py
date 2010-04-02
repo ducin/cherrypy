@@ -404,6 +404,13 @@ class CherryPyWSGIServer(object):
             # accept() by default
             return
         except socket.error, x:
+            if hasattr(errno, "EINTR") and x.args[0] == errno.EINTR:
+                # I *think* this is right. EINTR should occur when a signal
+                # is received during the accept() call; all docs say retry
+                # the call, and I *think* I'm reading it right that Python
+                # will then go ahead and poll for and handle the signal
+                # elsewhere. See http://www.cherrypy.org/ticket/707.
+                return
             msg = x.args[1]
             if msg == "Bad file descriptor":
                 # Our socket was closed
