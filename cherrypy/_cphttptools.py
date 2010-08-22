@@ -200,7 +200,11 @@ class Request(object):
             # Handle cookies differently because on Konqueror, multiple
             # cookies come on different lines with the same key
             if name.title() == 'Cookie':
-                self.simple_cookie.load(value)
+                try:
+                    self.simple_cookie.load(value)
+                except Cookie.CookieError:
+                    msg = "Illegal cookie name %s" % value.split('=')[0]
+                    raise cherrypy.HTTPError(400, msg)
         
         # Save original values (in case they get modified by filters)
         # This feature is deprecated in 2.2 and will be removed in 2.3.
