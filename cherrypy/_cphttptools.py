@@ -428,7 +428,7 @@ class Response(object):
         # Transform our header dict into a sorted list of tuples.
         self.header_list = self.headers.sorted_list(protocol=self.version)
         
-        cookie = self.simple_cookie.output()
+        cookie = self.simple_cookie.output(sep="\n")
         if cookie:
             for line in cookie.split("\n"):
                 name, value = line.split(": ", 1)
