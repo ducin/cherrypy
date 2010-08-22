@@ -485,7 +485,7 @@ def openURL(url, headers=None, method="GET", body=None,
                                 skip_accept_encoding=True)
             
             for key, value in headers:
-                conn.putheader(key, value)
+                conn.putheader(key, str(value))
             conn.endheaders()
             
             if body is not None:
