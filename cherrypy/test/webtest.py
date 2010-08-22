@@ -251,7 +251,7 @@ class WebCase(TestCase):
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except:
-                    result.addError(self, self._exc_info())
+                    result.addError(self, sys.exc_info())
                     return
                 
                 ok = 0
@@ -259,18 +259,18 @@ class WebCase(TestCase):
                     testMethod()
                     ok = 1
                 except self.failureException:
-                    result.addFailure(self, self._exc_info())
+                    result.addFailure(self, sys.exc_info())
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except:
-                    result.addError(self, self._exc_info())
+                    result.addError(self, sys.exc_info())
                 
                 try:
                     self.tearDown()
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except:
-                    result.addError(self, self._exc_info())
+                    result.addError(self, sys.exc_info())
                     ok = 0
                 if ok:
                     result.addSuccess(self)
