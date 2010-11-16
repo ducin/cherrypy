@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 from cherrypy.test import test
 test.prefer_parent_path()
 
@@ -25,7 +26,17 @@ def setup_server():
             return sing8
         utf8.exposed = True
         utf8._cp_config = {'tools.encode.encoding': 'utf-8'}
-    
+
+        def cookies_and_headers(self):
+            # if the headers have non-ascii characters and a cookie has
+            #  any part which is unicode (even ascii), the response
+            #  should not fail.
+            cherrypy.response.cookie['candy'] = 'bar'
+            cherrypy.response.cookie['candy']['domain'] = u'cherrypy.org'
+            cherrypy.response.headers['Some-Header'] = u'My dög has fleas'
+            return 'Any content'
+        cookies_and_headers.exposed = True
+
     class GZIP:
         def index(self):
             yield "Hello, world"
@@ -147,6 +158,10 @@ class EncodingTests(helper.CPWebCase):
                      headers=[("Accept-Encoding", "gzip")])
         self.assertHeader('Content-Encoding', 'gzip')
         self.assertMatchesBody(r"Unrecoverable error in the server.$")
+
+    def test_UnicodeHeaders(self):
+        self.getPage('/cookies_and_headers')
+        self.assertBody('Any content')
 
 
 if __name__ == "__main__":
