@@ -820,6 +820,10 @@ class Response(object):
         if cookie:
             for line in cookie.split("\n"):
                 name, value = line.split(": ", 1)
+                if isinstance(name, unicode):
+                    name = name.encode("ISO-8859-1")
+                if isinstance(value, unicode):
+                    value = headers.encode(value)
                 h.append((name, value))
     
     def check_timeout(self):
