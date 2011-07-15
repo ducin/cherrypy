@@ -590,9 +590,10 @@ def init(storage_type='ram', path=None, path_header=None, name='session_id',
          timeout=60, domain=None, secure=False, clean_freq=5, **kwargs):
     """Initialize session object (using cookies).
     
-    storage_type: one of 'ram', 'file', 'postgresql'. This will be used
-        to look up the corresponding class in cherrypy.lib.sessions
-        globals. For example, 'file' will use the FileSession class.
+    storage_type: one of 'ram', 'file', 'postgresql', 'memcached'. This
+        will be used to look up the corresponding class in
+        cherrypy.lib.sessions globals. For example, 'file' will use
+        the FileSession class.
     path: the 'path' value to stick in the response cookie metadata.
     path_header: if 'path' is None (the default), then the response
         cookie 'path' will be pulled from request.headers[path_header].
