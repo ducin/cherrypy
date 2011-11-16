@@ -66,7 +66,7 @@ class CPWebCase(webtest.WebCase):
         
         The function will optionally look for the regexp pattern,
         within the exception embedded in the error page."""
-        
+
         # This will never contain a traceback
         page = cherrypy._cperror.get_error_page(status, message=message)
         
@@ -76,6 +76,7 @@ class CPWebCase(webtest.WebCase):
         epage = esc(page)
         epage = epage.replace(esc('<pre id="traceback"></pre>'),
                               esc('<pre id="traceback">') + '(.*)' + esc('</pre>'))
+        
         m = re.match(epage, self.body, re.DOTALL)
         if not m:
             self._handlewebError('Error page does not match\n' + page)

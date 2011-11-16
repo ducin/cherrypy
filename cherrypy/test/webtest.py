@@ -205,6 +205,9 @@ class WebCase(TestCase):
             # IN6ADDR_ANY, which should respond on localhost.
             return "::1"
         return host
+
+    def _exc_info(self):
+        return sys.exc_info()
     
     def getPage(self, url, headers=None, method="GET", body=None, protocol=None):
         """Open the url with debugging support. Return status, headers, body."""
