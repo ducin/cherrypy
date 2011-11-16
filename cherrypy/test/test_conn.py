@@ -218,7 +218,8 @@ class ConnectionTests(helper.CPWebCase):
         # If we timeout without sending any data,
         # the server will close the conn with a 408.
         if cherrypy.server.protocol_version != "HTTP/1.1":
-            return self.skip()
+            print "skipped",
+            return
         
         self.PROTOCOL = "HTTP/1.1"
         
@@ -258,7 +259,9 @@ class ConnectionTests(helper.CPWebCase):
         # If we timeout after at least one request has succeeded,
         # the server will close the conn without 408.
         if cherrypy.server.protocol_version != "HTTP/1.1":
-            return self.skip()
+            print "skipped",
+            return
+
         
         self.PROTOCOL = "HTTP/1.1"
         
