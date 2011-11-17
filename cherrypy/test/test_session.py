@@ -253,8 +253,11 @@ class SessionTest(helper.CPWebCase):
         # skips the session code's before_handler and only calls
         # before_finalize (save) and on_end (close). So the session
         # code has to survive calling save/close without init.
-        self.getPage('/restricted', self.cookies, method='POST')
-        self.assertErrorPage(405, "Specified method is invalid for this resource.")
+        self.getPage('/restricted', self.cookies, method='POST')        
+        if sys.version_info <= (2, 6):
+            self.assertErrorPage(405, "Specified method is invalid for this server.")
+        else:
+            self.assertErrorPage(405, "Specified method is invalid for this resource.")
     
     def test_6_regenerate(self):
         self.getPage('/testStr')
@@ -386,7 +389,10 @@ else:
             # before_finalize (save) and on_end (close). So the session
             # code has to survive calling save/close without init.
             self.getPage('/restricted', self.cookies, method='POST')
-            self.assertErrorPage(405, "Specified method is invalid for this resource.")
+            if sys.version_info <= (2, 6):
+                self.assertErrorPage(405, "Specified method is invalid for this server.")
+            else:
+                self.assertErrorPage(405, "Specified method is invalid for this resource.")
 
 
 
