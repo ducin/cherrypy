@@ -86,8 +86,11 @@ import re
 import email.utils
 import socket
 import sys
-if 'win' in sys.platform and not hasattr(socket, 'IPPROTO_IPV6'):
-    socket.IPPROTO_IPV6 = 41
+if 'win' in sys.platform and hasattr(socket, "AF_INET6"):
+    if not hasattr(socket, 'IPPROTO_IPV6'):
+        socket.IPPROTO_IPV6 = 41
+    if not hasattr(socket, 'IPV6_V6ONLY'):
+        socket.IPV6_V6ONLY = 27
 if sys.version_info < (3,1):
     import io
 else:
@@ -97,10 +100,6 @@ DEFAULT_BUFFER_SIZE = io.DEFAULT_BUFFER_SIZE
 import threading
 import time
 from traceback import format_exc
-from urllib.parse import unquote
-from urllib.parse import urlparse
-from urllib.parse import scheme_chars
-import warnings
 
 if sys.version_info >= (3, 0):
     bytestr = bytes
@@ -265,8 +264,8 @@ class SizeCheckWrapper(object):
             self.bytes_read += len(data)
             self._check_length()
             res.append(data)
-            # See http://www.cherrypy.org/ticket/421
-            if len(data) < 256 or data[-1:] == "\n":
+            # See https://bitbucket.org/cherrypy/cherrypy/issue/421
+            if len(data) < 256 or data[-1:].decode() == LF:
                 return EMPTY.join(res)
 
     def readlines(self, sizehint=0):
@@ -754,7 +753,7 @@ class HTTPRequest(object):
         # but it seems like it would be a big slowdown for such a rare case.
         if self.inheaders.get(b"Expect", b"") == b"100-continue":
             # Don't use simple_response here, because it emits headers
-            # we don't want. See http://www.cherrypy.org/ticket/951
+            # we don't want. See https://bitbucket.org/cherrypy/cherrypy/issue/951
             msg = self.server.protocol.encode('ascii') + b" 100 Continue\r\n\r\n"
             try:
                 self.conn.wfile.write(msg)
@@ -1044,7 +1043,7 @@ class HTTPConnection(object):
                 # Don't error if we're between requests; only error
                 # if 1) no request has been started at all, or 2) we're
                 # in the middle of a request.
-                # See http://www.cherrypy.org/ticket/853
+                # See https://bitbucket.org/cherrypy/cherrypy/issue/853
                 if (not request_seen) or (req and req.started_request):
                     # Don't bother writing the 408 if the response
                     # has already started being written.
@@ -1229,13 +1228,24 @@ class ThreadPool(object):
 
     def grow(self, amount):
         """Spawn new worker threads (not above self.max)."""
-        for i in range(amount):
-            if self.max > 0 and len(self._threads) >= self.max:
-                break
-            worker = WorkerThread(self.server)
-            worker.setName("CP Server " + worker.getName())
-            self._threads.append(worker)
-            worker.start()
+        if self.max > 0:
+            budget = max(self.max - len(self._threads), 0)
+        else:
+            # self.max <= 0 indicates no maximum
+            budget = float('inf')
+
+        n_new = min(amount, budget)
+
+        workers = [self._spawn_worker() for i in range(n_new)]
+        while not all(worker.ready for worker in workers):
+            time.sleep(.1)
+        self._threads.extend(workers)
+
+    def _spawn_worker(self):
+        worker = WorkerThread(self.server)
+        worker.setName("CP Server " + worker.getName())
+        worker.start()
+        return worker
 
     def shrink(self, amount):
         """Kill off worker threads (not below self.min)."""
@@ -1246,13 +1256,17 @@ class ThreadPool(object):
                 self._threads.remove(t)
                 amount -= 1
 
-        if amount > 0:
-            for i in range(min(amount, len(self._threads) - self.min)):
-                # Put a number of shutdown requests on the queue equal
-                # to 'amount'. Once each of those is processed by a worker,
-                # that worker will terminate and be culled from our list
-                # in self.put.
-                self._queue.put(_SHUTDOWNREQUEST)
+        # calculate the number of threads above the minimum
+        n_extra = max(len(self._threads) - self.min, 0)
+
+        # don't remove more than amount
+        n_to_remove = min(amount, n_extra)
+
+        # put shutdown requests on the queue equal to the number of threads
+        # to remove. As each request is processed by a worker, that worker
+        # will terminate and be culled from the list.
+        for n in range(n_to_remove):
+            self._queue.put(_SHUTDOWNREQUEST)
 
     def stop(self, timeout=5):
         # Must shut down threads here so the code that calls
@@ -1287,7 +1301,7 @@ class ThreadPool(object):
                             worker.join()
                 except (AssertionError,
                         # Ignore repeated Ctrl-C.
-                        # See http://www.cherrypy.org/ticket/691.
+                        # See https://bitbucket.org/cherrypy/cherrypy/issue/691.
                         KeyboardInterrupt):
                     pass
 
@@ -1381,7 +1395,7 @@ class HTTPServer(object):
     timeout = 10
     """The timeout in seconds for accepted connections (default 10)."""
 
-    version = "CherryPy/3.2.2"
+    version = "CherryPy/3.2.4"
     """A version string for the HTTPServer."""
 
     software = None
@@ -1537,7 +1551,8 @@ class HTTPServer(object):
             af, socktype, proto, canonname, sa = res
             try:
                 self.bind(af, socktype, proto)
-            except socket.error:
+            except socket.error as serr:
+                msg = "%s -- (%s: %s)" % (msg, sa, serr)
                 if self.socket:
                     self.socket.close()
                 self.socket = None
@@ -1591,7 +1606,7 @@ class HTTPServer(object):
             self.socket = self.ssl_adapter.bind(self.socket)
 
         # If listening on the IPV6 any address ('::' = IN6ADDR_ANY),
-        # activate dual-stack. See http://www.cherrypy.org/ticket/871.
+        # activate dual-stack. See https://bitbucket.org/cherrypy/cherrypy/issue/871.
         if (hasattr(socket, 'AF_INET6') and family == socket.AF_INET6
             and self.bind_addr[0] in ('::', '::0', '::0.0.0.0')):
             try:
@@ -1678,14 +1693,14 @@ class HTTPServer(object):
                 # is received during the accept() call; all docs say retry
                 # the call, and I *think* I'm reading it right that Python
                 # will then go ahead and poll for and handle the signal
-                # elsewhere. See http://www.cherrypy.org/ticket/707.
+                # elsewhere. See https://bitbucket.org/cherrypy/cherrypy/issue/707.
                 return
             if x.args[0] in socket_errors_nonblocking:
-                # Just try again. See http://www.cherrypy.org/ticket/479.
+                # Just try again. See https://bitbucket.org/cherrypy/cherrypy/issue/479.
                 return
             if x.args[0] in socket_errors_to_ignore:
                 # Our socket was closed.
-                # See http://www.cherrypy.org/ticket/686.
+                # See https://bitbucket.org/cherrypy/cherrypy/issue/686.
                 return
             raise
 
@@ -1716,7 +1731,7 @@ class HTTPServer(object):
                     x = sys.exc_info()[1]
                     if x.args[0] not in socket_errors_to_ignore:
                         # Changed to use error code and not message
-                        # See http://www.cherrypy.org/ticket/860.
+                        # See https://bitbucket.org/cherrypy/cherrypy/issue/860.
                         raise
                 else:
                     # Note that we're explicitly NOT using AI_PASSIVE,
@@ -1938,7 +1953,7 @@ class WSGIGateway_10(WSGIGateway):
             'REMOTE_ADDR': req.conn.remote_addr or '',
             'REMOTE_PORT': str(req.conn.remote_port or ''),
             'REQUEST_METHOD': req.method.decode('ISO-8859-1'),
-            'REQUEST_URI': req.uri,
+            'REQUEST_URI': req.uri.decode('ISO-8859-1'),
             'SCRIPT_NAME': '',
             'SERVER_NAME': req.server.server_name,
             # Bah. "SERVER_PROTOCOL" is actually the REQUEST protocol.
@@ -1952,7 +1967,6 @@ class WSGIGateway_10(WSGIGateway):
             'wsgi.url_scheme': req.scheme.decode('ISO-8859-1'),
             'wsgi.version': (1, 0),
             }
-
         if isinstance(req.server.bind_addr, basestring):
             # AF_UNIX. This isn't really allowed by WSGI, which doesn't
             # address unix domain sockets. But it's better than nothing.
